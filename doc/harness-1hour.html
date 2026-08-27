@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Harness · 一小时速成（概念 + 面试）</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --panel-2: #1e2230;
+    --border: #2a2f3f;
+    --text: #e6e8ee;
+    --muted: #9aa3b5;
+    --accent: #4f8cff;
+    --accent-2: #22d3a7;
+    --warn: #f5a623;
+    --danger: #f0556a;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  header.hero {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 28px 22px;
+    background: linear-gradient(180deg, #1a1f2e, #14161f);
+    margin-bottom: 22px;
+  }
+  .kicker {
+    color: var(--accent-2);
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  h1 { font-size: 26px; margin: 8px 0 10px; line-height: 1.35; }
+  .lead { color: var(--muted); font-size: 15px; max-width: 860px; }
+  .conclusion {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: rgba(79,140,255,.08);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  .conclusion b { color: var(--accent); }
+
+  nav.tabs {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 20px;
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg); padding: 10px 0;
+  }
+  nav.tabs button {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    padding: 9px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    transition: .15s;
+  }
+  nav.tabs button:hover { color: var(--text); border-color: var(--accent); }
+  nav.tabs button.active {
+    background: var(--accent); color: #04121f; border-color: var(--accent); font-weight: 600;
+  }
+
+  .panel { display: none; animation: fade .25s ease; }
+  .panel.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+  h2 { font-size: 19px; margin: 4px 0 12px; }
+  h2 .num { color: var(--accent); margin-right: 8px; }
+  h3 { font-size: 16px; margin: 18px 0 8px; }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  code {
+    font-family: var(--mono);
+    background: #0b0d13;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 13px;
+    color: var(--accent-2);
+  }
+  .anchor {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: rgba(255,255,255,.04);
+    border-radius: 4px;
+    padding: 0 5px;
+    margin-right: 4px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border); margin-right: 4px; white-space: nowrap;
+  }
+  .tag.high { color: #7cb3ff; border-color: rgba(79,140,255,.4); }
+  .tag.low  { color: #6ee7c0; border-color: rgba(34,211,167,.4); }
+  .tag.gap  { color: #ffb36b; border-color: rgba(245,166,35,.4); }
+
+  /* timeline */
+  .timeline { position: relative; padding-left: 26px; }
+  .timeline::before {
+    content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px;
+    width: 2px; background: var(--border);
+  }
+  .step { position: relative; margin-bottom: 12px; }
+  .step::before {
+    content: ""; position: absolute; left: -24px; top: 18px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .step.done::before { background: var(--accent-2); }
+  .step-head {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 14px; user-select: none;
+  }
+  .step-head:hover { border-color: var(--accent); }
+  .step-time { font-family: var(--mono); color: var(--accent); font-size: 12px; white-space: nowrap; }
+  .step-title { font-weight: 600; flex: 1; }
+  .step .caret { color: var(--muted); transition: .2s; }
+  .step.open .caret { transform: rotate(90deg); }
+  .step-body { display: none; padding: 14px 16px; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; background: var(--panel-2); }
+  .step.open .step-body { display: block; }
+  .step-body h4 { margin: 12px 0 4px; font-size: 14px; }
+  .step-body h4:first-child { margin-top: 0; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .check { margin-left: auto; }
+  .check input { transform: scale(1.15); accent-color: var(--accent-2); cursor: pointer; }
+
+  /* flashcards */
+  .flash-wrap { perspective: 1200px; margin: 14px auto; max-width: 640px; }
+  .flash {
+    position: relative; width: 100%; min-height: 220px;
+    transform-style: preserve-3d; transition: transform .5s;
+    cursor: pointer;
+  }
+  .flash.flipped { transform: rotateY(180deg); }
+  .flash-face {
+    position: absolute; inset: 0; backface-visibility: hidden;
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px 24px; display: flex; flex-direction: column; justify-content: center;
+  }
+  .flash-front { background: var(--panel); }
+  .flash-back { background: #16202b; transform: rotateY(180deg); }
+  .flash-front .q { font-size: 17px; font-weight: 600; }
+  .flash-back .a { font-size: 14.5px; }
+  .flash-hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  .flash-nav { display: flex; gap: 10px; justify-content: center; align-items: center; margin-top: 14px; }
+  .flash-nav button, button.primary {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 14px;
+  }
+  .flash-nav button:hover { border-color: var(--accent); }
+  .flash-count { color: var(--muted); font-size: 13px; min-width: 80px; text-align: center; }
+
+  /* quiz */
+  .quiz-q { margin-bottom: 20px; }
+  .quiz-q .stem { font-weight: 600; margin-bottom: 8px; }
+  .opt {
+    display: block; width: 100%; text-align: left; margin: 6px 0; padding: 10px 14px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; color: var(--text); font-family: inherit; font-size: 14px; transition: .12s;
+  }
+  .opt:hover { border-color: var(--accent); }
+  .opt.correct { border-color: var(--accent-2); background: rgba(34,211,167,.12); }
+  .opt.wrong { border-color: var(--danger); background: rgba(240,85,106,.12); }
+  .opt:disabled { cursor: default; opacity: .9; }
+  .scorebar { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+  .scorebar .bar { flex: 1; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+  .scorebar .fill { height: 100%; background: var(--accent-2); width: 0; transition: width .3s; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="kicker">Agent Harness · 一小时速成</div>
+    <h1>模型是大脑，Harness 是身体、工作台和安全边界</h1>
+    <p class="lead">
+      这个页面回答四件事：①两个仓库各自把「agent harness」当成什么 ②它们之间的差距在哪
+      ③一小时怎么从「说得出概念」到「扛得住面试」 ④配套自测。
+    </p>
+    <div class="conclusion">
+      <b>结论先行：</b>同一个词的两半。<code>AgentHarness101</code> 是「运行时 Harness」的宽地图
+      （6 层 + 课程大纲，代码只落了状态层和验证循环两层）；
+      <code>learn-harness-engineering</code> 是「仓库文件 Harness」的窄但完整可跑的课程
+      （5 子系统 + 8 个 Electron 项目全套代码）。前者宽而不深，后者窄而完整，且前者已经在向后者移植。
+      面试要拿分，你只需要一条主线：<b>可靠性不来自「模型更听话」，而来自「模型即使想错了，也碰不到不该碰的东西」。</b>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="active" data-tab="tab1">① 两仓库定义</button>
+    <button data-tab="tab2">② 差距 Gap</button>
+    <button data-tab="tab3">③ 一小时路线</button>
+    <button data-tab="tab4">④ 面试自测</button>
+  </nav>
+
+  <!-- ===================== TAB 1 ===================== -->
+  <section class="panel active" id="tab1">
+    <div class="card">
+      <h2><span class="num">1</span>两个仓库各自把「agent harness」当成什么</h2>
+      <p class="muted">先记住一句话定义（<span class="anchor">TASK.md:19-21</span>），这是面试开口的第一句：</p>
+      <blockquote style="border-left:3px solid var(--accent);margin:10px 0;padding:6px 16px;color:var(--text);background:rgba(79,140,255,.05);border-radius:8px;">
+        模型负责判断下一步想做什么；Harness 负责决定它能看到什么、能调用什么、怎么执行、怎么记录、怎么验证、什么时候停。
+      </blockquote>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>本仓库 · AgentHarness101</h3>
+        <p class="muted small">宽地图：6 层运行时架构 + 200–260h 课程大纲，代码落地 2 层。</p>
+        <div class="pill-row">
+          <span class="tag high">6 层定义</span><span class="tag low">代码=2 包</span>
+        </div>
+        <p><b>概念层（6 层）</b>——<span class="anchor">TASK.md:134-182</span>：</p>
+        <ol>
+          <li>上下文管理（Context Engineering）</li>
+          <li>工具管理（Tool Registry）</li>
+          <li>执行环境（Execution Sandbox）</li>
+          <li>状态与记忆（State &amp; Memory）</li>
+          <li>验证与评估（Verification &amp; Eval）</li>
+          <li>观测与审计（Observability &amp; Audit）</li>
+        </ol>
+        <p class="muted small">另在 <span class="anchor">00-课程大纲.md:104-115</span> 编成 M0–M8 课表；M5/M6 还额外展开「安全 HITL/成本/限流」。</p>
+        <p><b>代码层（真正写好的 2 包）</b>：</p>
+        <ul>
+          <li><code>goal_persistence/</code> —— 状态层：SQLite 持久化 + 状态机
+            （<span class="anchor">models.py:29-43</span> <code>ALLOWED_TRANSITIONS</code> 拒绝非法跳转；
+             <span class="anchor">runtime.py:123-146</span> idle self-start + resume；
+             <span class="anchor">models.py:114-124</span> 预算熔断）。</li>
+          <li><code>goal_loop/</code> —— 验证层 + Loop：maker/checker 分离
+            （<span class="anchor">roles.py:18-26</span> 只有 checker 的 verdict 算完成；
+             <span class="anchor">verifier.py:12-18</span> <code>shell=False</code> + 超时，一小片沙箱）。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>learn-harness-engineering</h3>
+        <p class="muted small">窄但完整：5 子系统「仓库文件 Harness」+ 8 个 Electron 项目全套代码。</p>
+        <div class="pill-row">
+          <span class="tag high">5 子系统</span><span class="tag low">代码=8 项目</span>
+        </div>
+        <p><b>定义</b>——<span class="anchor">README.md:149-191</span>，harness 是仓库里的一组文件，约束 coding agent 的会话：</p>
+        <ol>
+          <li>Instructions（AGENTS.md / CLAUDE.md）</li>
+          <li>State（progress log + feature_list + git log）</li>
+          <li>Verification（tests / lint / type-check / smoke）</li>
+          <li>Scope（一次只做一个 feature）</li>
+          <li>Session Lifecycle（init.sh 起、clean state 收尾）</li>
+        </ol>
+        <p class="muted small">文件清单见 <span class="anchor">README.md:250-257</span>；16 步会话生命周期见 <span class="anchor">README.md:466-509</span>。</p>
+        <p><b>核心证据</b>——<span class="anchor">README.md:122</span>：同一 Opus 4.5 模型，无 harness $9/20min 做出废品，有 harness $200/6h 做出能玩的游戏。<b>模型没变，变的只有 harness。</b></p>
+        <p class="muted small">它是一门课（VitePress 文档 + 14 讲 + 8 项目，<span class="anchor">CLAUDE.md:5-6</span>），围绕一个 Electron 知识库 App 逐项目演进。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>关键区分：不是两套对立定义，是一条谱系</h3>
+      <p>本仓库的 <code>goal_loop</code> 包直接移植自对方的 Lecture 13 / Project 07：</p>
+      <p class="muted" style="font-size:13.5px;"><span class="anchor">goal_loop/__init__.py:1-7</span>
+      「ports the <code>/goal</code> loop from <code>learn-harness-engineering</code> (Lecture 13 / Project 07)」。</p>
+      <p>所以：<b>6 层是全景，5 子系统是其中「仓库内那部分」的落地。</b>面试时主动点出这条谱系，是「读过源码」的加分信号。</p>
+    </div>
+  </section>
+
+  <!-- ===================== TAB 2 ===================== -->
+  <section class="panel" id="tab2">
+    <div class="card">
+      <h2><span class="num">2</span>差距 Gap</h2>
+      <p class="conclusion" style="margin-top:0;">
+        <b>一句 gap：</b><code>AgentHarness101</code> 定义更宽（6 层，覆盖安全/成本/MCP/观测）但代码只落地 2 层；
+        <code>learn-harness-engineering</code> 代码完整可跑但定义更窄（5 个仓库文件子系统），不碰运行时安全区。
+        从 5 子系统走到 6 层，差的就是<b>沙箱、工具协议、权限、追踪、成本</b>这五块运行时能力。
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>差距对照表</h3>
+      <table>
+        <tr><th>维度</th><th>AgentHarness101（本仓库）</th><th>learn-harness-engineering</th><th>谁缺</th></tr>
+        <tr><td>定义口径</td><td>6 层，运行时中心</td><td>5 子系统，仓库文件中心</td><td>口径不同</td></tr>
+        <tr><td>可跑代码</td><td>2 包（状态机 + maker/checker 循环）</td><td>8 项目 × starter/solution Electron App</td><td>本仓库代码薄</td></tr>
+        <tr><td>沙箱 / 命令白名单</td><td>仅 <code>verifier.py</code> 的 <code>shell=False</code> 一小片</td><td>无（工具是固定 IPC handler）</td><td>两边都缺</td></tr>
+        <tr><td>工具注册表 / MCP</td><td>计划（M3）</td><td>无动态工具注册</td><td>两边都缺</td></tr>
+        <tr><td>上下文压缩</td><td>计划（M2）</td><td>无显式压缩（靠仓库文件结构）</td><td>本仓库缺</td></tr>
+        <tr><td>观测 / Trace / 回放</td><td>计划（M7）</td><td>L11 观测=进度日志，非 OTel</td><td>两边都缺运行时追踪</td></tr>
+        <tr><td>安全 HITL / RBAC / 注入</td><td>计划（M6）</td><td>无</td><td>两边都缺</td></tr>
+        <tr><td>成本 / 限流 / 缓存</td><td>计划（M5.7）</td><td>无</td><td>本仓库有规划</td></tr>
+        <tr><td>教学完备度</td><td>大纲 + TASK.md，无完整项目</td><td>完整课程 + skill + audit 脚本</td><td>本仓库缺</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>6 层 ↔ 5 子系统 映射（面试必背）</h3>
+      <table>
+        <tr><th>6 层（运行时）</th><th>5 子系统（仓库文件）</th><th>覆盖关系</th></tr>
+        <tr><td>上下文管理</td><td>Instructions + progressive disclosure</td><td>部分重叠：指令是上下文的一种，上下文还包括历史/工具结果/摘要</td></tr>
+        <tr><td>工具管理</td><td>（无；KB app 工具=固定 IPC）</td><td>6 层多了：工具注册表 / MCP / 动态启用</td></tr>
+        <tr><td>执行环境</td><td>（无；仅「跑测试」验证）</td><td>6 层多了：沙箱 / 白名单 / 资源限制</td></tr>
+        <tr><td>状态与记忆</td><td>State（progress + feature_list + git）</td><td>高度重叠</td></tr>
+        <tr><td>验证与评估</td><td>Verification（tests/lint/type/smoke）</td><td>高度重叠；6 层多了 eval 集 / LLM-judge</td></tr>
+        <tr><td>观测与审计</td><td>Scope + Lifecycle（部分）</td><td>部分重叠；6 层多了 OTel trace / 回放</td></tr>
+        <tr><td>安全 HITL / RBAC（M6）</td><td>（无）</td><td>6 层多了安全层</td></tr>
+        <tr><td>成本 / 限流 / 缓存（M5.7）</td><td>（无）</td><td>6 层多了成本层</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TAB 3 ===================== -->
+  <section class="panel" id="tab3">
+    <div class="card">
+      <h2><span class="num">3</span>一小时路线（high 心智模型 → low 面试硬通货）</h2>
+      <p class="muted">
+        勾选每步完成进度（存本地浏览器）。点开每步看细节。<span class="tag high">HIGH</span> = 概念/心智，
+        <span class="tag low">LOW</span> = 面试会被追问的实现原语。
+      </p>
+    </div>
+
+    <div class="timeline" id="timeline"></div>
+  </section>
+
+  <!-- ===================== TAB 4 ===================== -->
+  <section class="panel" id="tab4">
+    <div class="card">
+      <h2><span class="num">4</span>面试自测</h2>
+      <p class="muted">上半部分是闪卡（点卡片翻面，背出答案再翻），下半部分是选择题自测。</p>
+    </div>
+
+    <div class="card">
+      <h3>概念闪卡 <span class="muted small">(点击翻面)</span></h3>
+      <div class="flash-wrap">
+        <div class="flash" id="flash">
+          <div class="flash-face flash-front"><div class="q" id="flashQ"></div><div class="flash-hint">点击卡片看答案</div></div>
+          <div class="flash-face flash-back"><div class="a" id="flashA"></div></div>
+        </div>
+      </div>
+      <div class="flash-nav">
+        <button id="prevFlash">← 上一张</button>
+        <span class="flash-count" id="flashCount"></span>
+        <button id="nextFlash">下一张 →</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>选择题自测</h3>
+      <div class="scorebar">
+        <span id="scoreText" class="small muted">0 / 0</span>
+        <div class="bar"><div class="fill" id="scoreFill"></div></div>
+        <button class="primary" id="resetQuiz">重做</button>
+      </div>
+      <div id="quiz"></div>
+    </div>
+  </section>
+
+  <footer>
+    单文件零依赖 · 内容锚定 AgentHarness101 与 learn-harness-engineering 两个仓库的真实代码与文档 · 生成于 2026-08-27
+  </footer>
+</div>
+
+<script>
+/* ===================== Tabs ===================== */
+const tabs = document.querySelectorAll('nav.tabs button');
+const panels = document.querySelectorAll('.panel');
+tabs.forEach(btn => btn.addEventListener('click', () => {
+  tabs.forEach(b => b.classList.remove('active'));
+  panels.forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(btn.dataset.tab).classList.add('active');
+}));
+
+/* ===================== Timeline ===================== */
+const STEPS = [
+  {
+    time: "0–8 min", title: "一句话心智模型 + 一个对照实验", tags: ["high"],
+    html: `
+      <h4>HIGH · 心智模型</h4>
+      <p><b>Model + Harness = Agent</b>。模型负责推理和决策，harness 负责提供上下文、连接工具、管理状态、控制权限、执行动作、记录过程、验证结果（<span class="anchor">TASK.md:19-21</span>）。</p>
+      <p>打一个比喻：模型是大脑，harness 是身体、工作台、工具箱、操作规程和安全边界。</p>
+      <h4>HIGH · 一个必须记住的数字</h4>
+      <p>Anthropic 对照实验（<span class="anchor">README.md:122</span>）：同一个 Opus 4.5，无 harness <b>$9 / 20 分钟</b> 做出废品；有 harness（planner + generator + evaluator）<b>$200 / 6 小时</b> 做出能玩的游戏。<b>模型没变，变的只有 harness。</b>这句是整场面试的题眼。</p>
+      <h4>LOW · 最简 Agent 循环（30 行能写出来）</h4>
+      <p><code>while not done: think → pick_tool → execute → feed_result_back</code>。几十行就能写，但 demo 变生产会冒出 10 个问题：能读哪些文件？能不能改？超时怎么办？上下文爆了怎么办？改错怎么回滚？连续失败还继续吗？怎么审计？（<span class="anchor">TASK.md:76-84</span>）</p>
+    `
+  },
+  {
+    time: "8–20 min", title: "两套定义 = 两个阵营（面试区分度所在）", tags: ["high", "low"],
+    html: `
+      <h4>HIGH · 6 层（运行时中心）</h4>
+      <p>上下文 / 工具 / 执行环境 / 状态记忆 / 验证评估 / 观测审计（<span class="anchor">TASK.md:134-182</span>）。口径宽，覆盖安全、成本、MCP、追踪。</p>
+      <h4>HIGH · 5 子系统（仓库文件中心）</h4>
+      <p>Instructions / State / Verification / Scope / Lifecycle（<span class="anchor">README.md:149-191</span>）。口径窄，harness = 仓库里那组文件（AGENTS.md / init.sh / feature_list.json）。</p>
+      <h4>LOW · 二者怎么串起来</h4>
+      <p>6 层是全景，5 子系统是其中「仓库内那部分」。本仓库的 <code>goal_loop</code> 直接移植自对方的 Lecture 13 / Project 07（<span class="anchor">goal_loop/__init__.py:1-7</span>）。主动点出这条谱系 = 「读过源码」。</p>
+    `
+  },
+  {
+    time: "20–38 min", title: "6 层：每层一句话 + 一个反模式", tags: ["high", "low"],
+    html: `
+      <p class="muted small">每层背「一句话职责 + 一个反模式」，面试被问到任一层都能各答 30 秒。</p>
+      <h4>① 上下文管理</h4>
+      <p>决定塞多少、摘要什么、哪些只给引用、哪些标来源防注入。<b>反模式</b>：一股脑全塞 → 注意力污染 + 成本爆炸。</p>
+      <h4>② 工具管理</h4>
+      <p>注册表 + 最小权限 + 阶段感知（分析阶段只读、修改阶段才给写入）。<b>反模式</b>：工具越多越好 → 选错概率越高。</p>
+      <h4>③ 执行环境（沙箱）</h4>
+      <p>工作目录限定 + 命令白名单 + 超时 + 资源限制；deny-by-default。<b>反模式</b>：在生产机裸跑。</p>
+      <h4>④ 状态与记忆</h4>
+      <p>任务状态（plan/todo/done）持久化 + checkpoint 断点续跑。<b>反模式</b>：只存聊天记录，重启就失忆。</p>
+      <h4>⑤ 验证与评估</h4>
+      <p>跑测试/lint/type-check + eval 集 + LLM-judge。<b>反模式</b>：模型说「修好了」就算修好了。</p>
+      <h4>⑥ 观测与审计</h4>
+      <p>结构化日志 + trace + 回放。<b>反模式</b>：出问题只剩最后一句「抱歉失败了」。</p>
+    `
+  },
+  {
+    time: "38–50 min", title: "三个面试硬通货（LOW 原语）", tags: ["low"],
+    html: `
+      <h4>LOW 1 · 状态机 + 非法迁移拒绝</h4>
+      <p>状态机把「能怎么变」显式化。看 <span class="anchor">goal_persistence/models.py:29-43</span> 的 <code>ALLOWED_TRANSITIONS</code>：Active → {Paused, Blocked, UsageLimited, BudgetLimited, Complete}，<code>Complete</code> 和 <code>BudgetLimited</code> 是终态、无出边，任何其他跳转抛 <code>TransitionError</code>。<b>面试能说：状态机是 harness 的骨架，非法迁移在代码层被拒绝，不靠 prompt 兜底。</b></p>
+      <h4>LOW 2 · maker / checker 分离（generator / evaluator split）</h4>
+      <p>生成者自述「我修好了」<b>永远不被信任</b>。看 <span class="anchor">goal_loop/roles.py:18-26</span>：只有独立的 <code>Checker</code> verdict 决定这轮是否完成。<b>这是 Anthropic「有效 harness」的核心结论，也是消除「谎报完成」的第一原则。</b></p>
+      <h4>LOW 3 · 不可变日志 + fail-closed 沙箱</h4>
+      <p>工业级实现（DSH）两条不变式：① append-only session log——模型看到的每条消息都能从日志字节级重建；② fail-closed 沙箱——没有沙箱后端就 <code>SANDBOX_UNAVAILABLE</code> 拒绝执行，绝不裸奔。本仓库的 <span class="anchor">goal_loop/verifier.py:12-18</span> 用 <code>shell=False</code> 堵 shell 注入，是同一思路的最小版。<b>面试能说：可靠性靠「模型想错也碰不到不该碰的」，不靠「模型更听话」。</b></p>
+    `
+  },
+  {
+    time: "50–60 min", title: "高频题自测（切到 Tab ④）", tags: ["high", "low"],
+    html: `<p>去第 ④ 个标签页：10 张概念闪卡 + 8 道选择题。全部能答对，这一小时的 ROI 就到手了。</p>`
+  }
+];
+
+const STORE_KEY = 'harness1hour_steps';
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); } catch (e) { saved = {}; }
+
+function saveSteps() { localStorage.setItem(STORE_KEY, JSON.stringify(saved)); }
+
+const timeline = document.getElementById('timeline');
+STEPS.forEach((s, i) => {
+  const el = document.createElement('div');
+  el.className = 'step' + (saved[i] ? ' done' : '');
+  el.innerHTML = `
+    <div class="step-head">
+      <span class="step-time">${s.time}</span>
+      <span class="step-title">${s.title}</span>
+      ${s.tags.map(t => `<span class="tag ${t}">${t === 'high' ? 'HIGH' : 'LOW'}</span>`).join('')}
+      <label class="check" onclick="event.stopPropagation()">
+        <input type="checkbox" ${saved[i] ? 'checked' : ''} data-idx="${i}">
+      </label>
+      <span class="caret">▶</span>
+    </div>
+    <div class="step-body">${s.html}</div>`;
+  timeline.appendChild(el);
+
+  const head = el.querySelector('.step-head');
+  head.addEventListener('click', () => el.classList.toggle('open'));
+  const cb = el.querySelector('input');
+  cb.addEventListener('change', () => {
+    saved[i] = cb.checked;
+    el.classList.toggle('done', cb.checked);
+    saveSteps();
+  });
+});
+
+/* ===================== Flashcards ===================== */
+const CARDS = [
+  { q: "一句话定义 agent harness？", a: "模型负责判断下一步想做什么；harness 负责决定它能看到什么、能调用什么、怎么执行、怎么记录、怎么验证、什么时候停。（TASK.md:19-21）" },
+  { q: "6 层架构是哪 6 层？", a: "上下文管理、工具管理、执行环境（沙箱）、状态与记忆、验证与评估、观测与审计。（TASK.md:134-182）" },
+  { q: "5 子系统是哪 5 个？", a: "Instructions、State、Verification、Scope、Session Lifecycle。（README.md:149-191）" },
+  { q: "6 层和 5 子系统的关系？", a: "6 层是全景（运行时中心），5 子系统是其中「仓库内那部分」的落地（仓库文件中心）。6 层多出沙箱、工具协议、权限、追踪、成本五块。" },
+  { q: "最硬的一条证据（数字）？", a: "同一 Opus 4.5：无 harness $9/20min 废品；有 harness $200/6h 能玩的游戏。模型没变，变的只有 harness。（README.md:122）" },
+  { q: "为什么「模型+工具」还不够？", a: "工具意味着副作用（改文件/退款/发邮件）。可靠性不来自「模型更听话」，而来自「模型想错也碰不到不该碰的」——这是 harness 的职责，不是 prompt 的职责。" },
+  { q: "状态机在 harness 里干什么？", a: "把「状态能怎么变」显式化，非法迁移在代码层拒绝（ALLOWED_TRANSITIONS + TransitionError），不靠 prompt 兜底。（models.py:29-43）" },
+  { q: "maker / checker 分离是什么？", a: "generator/evaluator split：生成者自述「修好了」不被信任，只有独立 checker 的 verdict 决定完成。（roles.py:18-26）" },
+  { q: "两条工业级不变式？", a: "① append-only session log（消息可字节级重建）② fail-closed 沙箱（无沙箱后端就拒绝执行，绝不裸奔）。" },
+  { q: "demo 变生产的 10 个问题举 3 个？", a: "能读/改哪些文件？超时怎么办？上下文爆了怎么办？改错怎么回滚？连续失败还要不要继续？事后怎么审计？（TASK.md:76-84 任选）" }
+];
+let flashIdx = 0;
+const flashEl = document.getElementById('flash');
+const flashQ = document.getElementById('flashQ');
+const flashA = document.getElementById('flashA');
+const flashCount = document.getElementById('flashCount');
+function renderFlash() {
+  flashEl.classList.remove('flipped');
+  flashQ.textContent = CARDS[flashIdx].q;
+  flashA.textContent = CARDS[flashIdx].a;
+  flashCount.textContent = `${flashIdx + 1} / ${CARDS.length}`;
+}
+flashEl.addEventListener('click', () => flashEl.classList.toggle('flipped'));
+document.getElementById('prevFlash').addEventListener('click', () => {
+  flashIdx = (flashIdx - 1 + CARDS.length) % CARDS.length; renderFlash();
+});
+document.getElementById('nextFlash').addEventListener('click', () => {
+  flashIdx = (flashIdx + 1) % CARDS.length; renderFlash();
+});
+renderFlash();
+
+/* ===================== Quiz ===================== */
+const QUIZ = [
+  { stem: "一句话里，模型负责什么、harness 负责什么？", opts: ["模型负责执行工具，harness 负责生成文本", "模型负责判断下一步想做什么，harness 决定看什么/调什么/怎么执行/怎么记/怎么验证/何时停", "模型负责写代码，harness 负责训练模型", "模型和 harness 是同一回事"], ans: 1 },
+  { stem: "6 层架构里，「决定工具注册表 + 最小权限」是哪一层？", opts: ["上下文管理", "执行环境", "工具管理", "观测审计"], ans: 2 },
+  { stem: "5 子系统里，Session Lifecycle 主要指？", opts: ["init 起、clean state 收尾、留可续跑路径", "把上下文压缩成摘要", "给工具做 JSON schema 校验", "用 OTel 打 trace"], ans: 0 },
+  { stem: "本仓库的 goal_loop 包是从哪里移植的？", opts: ["OpenAI Codex 源码", "learn-harness-engineering 的 Lecture 13 / Project 07", "LangChain 源码", "DeepSeek Harness"], ans: 1 },
+  { stem: "Anthropic 对照实验的核心结论？", opts: ["更贵的模型必然更好", "prompt 写得好就能可靠", "模型没变，变的只有 harness，harness 决定可靠性", "harness 越复杂越好"], ans: 2 },
+  { stem: "「mark_complete 必须带 evidence」体现的是哪层？", opts: ["上下文管理", "验证与评估（完成审计）", "执行环境", "成本控制"], ans: 1 },
+  { stem: "CommandVerifier 用 shell=False 的目的？", opts: ["让命令跑得更快", "堵住 shell 元字符注入", "兼容 Windows", "抓更多日志"], ans: 1 },
+  { stem: "「可靠性来自模型想错也碰不到不该碰的」对应哪条设计原则？", opts: ["deny-by-default / fail-closed", "工具越多越好", "prompt 写满规则", "无限重试直到成功"], ans: 0 }
+];
+let quizState = QUIZ.map(() => null);
+let answered = 0;
+const quizEl = document.getElementById('quiz');
+const scoreText = document.getElementById('scoreText');
+const scoreFill = document.getElementById('scoreFill');
+function renderQuiz() {
+  quizEl.innerHTML = '';
+  answered = quizState.filter(x => x !== null).length;
+  let correct = quizState.filter((x, i) => x === QUIZ[i].ans).length;
+  scoreText.textContent = `${correct} / ${QUIZ.length}`;
+  scoreFill.style.width = `${(correct / QUIZ.length) * 100}%`;
+
+  QUIZ.forEach((q, qi) => {
+    const div = document.createElement('div');
+    div.className = 'quiz-q';
+    let optsHtml = q.opts.map((o, oi) => {
+      let cls = 'opt';
+      if (quizState[qi] !== null) {
+        if (oi === q.ans) cls += ' correct';
+        else if (oi === quizState[qi]) cls += ' wrong';
+      }
+      const disabled = quizState[qi] !== null ? 'disabled' : '';
+      return `<button class="${cls}" data-q="${qi}" data-o="${oi}" ${disabled}>${o}</button>`;
+    }).join('');
+    div.innerHTML = `<div class="stem">${qi + 1}. ${q.stem}</div>${optsHtml}`;
+    quizEl.appendChild(div);
+  });
+
+  quizEl.querySelectorAll('.opt:not([disabled])').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qi = +btn.dataset.q, oi = +btn.dataset.o;
+      quizState[qi] = oi;
+      renderQuiz();
+    });
+  });
+}
+document.getElementById('resetQuiz').addEventListener('click', () => {
+  quizState = QUIZ.map(() => null); renderQuiz();
+});
+renderQuiz();
+</script>
+</body>
+</html>

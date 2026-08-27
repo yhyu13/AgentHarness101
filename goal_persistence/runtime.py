@@ -75,6 +75,10 @@ class GoalRuntime:
         )
         return self._store.create(goal)
 
+    def get_goal(self, thread_id: str) -> Optional[Goal]:
+        """Read the durable goal row for a thread, if one exists."""
+        return self._store.get(thread_id)
+
     def start_turn(self, thread_id: str) -> TurnAccounting:
         """Begin tracking a new turn in memory.
 

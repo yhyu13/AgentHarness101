@@ -1,13 +1,40 @@
-# Goal Persistence Harness
+# Agent Harness 101
 
-A minimal, testable implementation of persistent agent goals: an objective that
-keeps an agent working across turns, sessions, and process restarts until it is
-genuinely complete.
+A minimal, testable implementation of the agent harness across its six runtime layers
+plus the safety and cost-control cross-cuts:
+
+- **Context management** (`context_compaction/`)
+- **Tool management** (`tool_registry/`)
+- **Execution environment** (`sandbox/`)
+- **State & memory** (`goal_persistence/`, `hippocampus/`)
+- **Verification & eval** (`goal_loop/`, `eval_harness/`)
+- **Observability & audit** (`observability/`)
+- **Safety** (`safety/`) and **cost control** (`cost_control/`)
 
 Distilled from the Codex goal feature and aligned with the *Agent Harness 101*
 curriculum.
 
-## What it does
+## Modules
+
+| Module | What it owns | Source |
+|---|---|---|
+| `goal_persistence/` | Durable state, idle self-start, anti-drift steering, resume, budget auto-transition | Codex goal feature |
+| `goal_loop/` | `goal.md` parsing, maker/checker split, machine verification, loop state, stop conditions | `learn-harness-engineering` Lecture 13 / Project 07 |
+| `context_compaction/` | 80% cutoff, keep marked verbatim, archive + summarize the rest | Study guide layer ① |
+| `hippocampus/` | Task trajectory, important-content index, local cache, learn/unlearn, replay | Study guide layer ④ |
+| `tool_registry/` | Register tools, permission labels, least privilege, schema validation | Study guide layer ② |
+| `sandbox/` | Fail-closed allowlist executor (not an OS-level jail) | Study guide layer ③ |
+| `eval_harness/` | Eval set + deterministic ExactJudge (swap in an LLM-judge) | Study guide layer ⑤ |
+| `observability/` | Append-only trace log + byte-level replay | Study guide layer ⑥ |
+| `safety/` | RBAC roles, high-risk HITL, prompt-injection marker | Study guide M6 |
+| `cost_control/` | Token-bucket rate limiter + tool-result cache | Study guide M5.7 |
+
+The `goal_loop` composes the persistence layer rather than reimplementing it:
+`GoalLoopRunner` drives `GoalRuntime` for durable goals, and delegates the
+blocked/complete audits to it. The other layers are independent and compose the same
+way — each is a small, tested unit with a runnable demo.
+
+## What goal_persistence does
 
 1. **Durable state** — one SQLite row per thread/context ID.
 2. **Idle self-start** — when a thread is idle and the goal is active, produce a
@@ -29,14 +56,52 @@ Active → { Paused, Blocked, UsageLimited, BudgetLimited, Complete }
 ## Project layout
 
 ```text
-goal_persistence/
-  __init__.py      # public API
-  models.py        # Goal, GoalStatus, Usage, transition rules
-  store.py         # SQLite schema + CRUD
-  accounting.py    # TurnAccounting (in-memory per-turn deltas)
-  runtime.py       # idle self-start, resume, audit helpers
+goal_persistence/            # durable goal state machine (state layer)
+  __init__.py                # public API
+  models.py                  # Goal, GoalStatus, Usage, transition rules
+  store.py                   # SQLite schema + CRUD
+  accounting.py              # TurnAccounting (in-memory per-turn deltas)
+  runtime.py                 # idle self-start, resume, audit helpers
+goal_loop/                   # maker/checker verification loop (verification layer)
+  loop_runner.py             # loop driver
+  models.py                  # GoalSpec, AcceptanceCriterion, LoopState
+  roles.py                   # Maker / Checker protocols (generator/evaluator split)
+  verifier.py                # CommandVerifier (argv-based, shell=False)
+  templates/                 # goal.md, loop-state.md, maker/checker prompts
+context_compaction/          # context management layer (80% cutoff compaction)
+  compactor.py               # keep marked, archive + summarize the rest
+  summarizer.py              # pluggable ExtractiveSummarizer (swap in an LLM)
+hippocampus/                 # long-term memory layer
+  memory.py                  # Hippocampus: record, index, learn/unlearn, replay
+  store.py                   # on-disk trajectories + memory index + cache
+tool_registry/               # tool management layer
+  registry.py                # ToolRegistry: permission gate + schema validation
+sandbox/                     # execution environment layer
+  sandbox.py                 # fail-closed allowlist executor (shell=False + timeout)
+eval_harness/                # verification & eval layer
+  judge.py                   # EvalRunner + ExactJudge (deterministic, not an LLM)
+observability/               # observability & audit layer
+  trace.py                   # append-only TraceLog + replay
+safety/                      # safety cross-cut
+  safety.py                  # SafetyGuard: RBAC + HITL + injection marker
+cost_control/                # cost cross-cut
+  cost.py                    # RateLimiter + ToolResultCache
+examples/                    # runnable demos (run from repo root)
+  demo.py                    # goal persistence demo
+  goal_loop_demo.py          # fail-then-pass loop demo
+  llm_demo.py                # real LLM demo (needs ANTHROPIC_AUTH_TOKEN)
+  context_compaction_demo.py # 80% cutoff demo
+  hippocampus_demo.py        # trajectory + learn/unlearn + replay demo
+  harness_layers_demo.py     # registry/sandbox/eval/trace/safety/cost demo
 tests/
-  test_harness.py  # manual lifecycle tests against a real DB
+  test_harness.py            # goal_persistence lifecycle tests
+  test_goal_loop.py          # goal_loop verification tests
+  test_context_compaction.py # context compaction tests
+  test_hippocampus.py        # long-term memory tests
+  test_harness_layers.py     # registry/sandbox/eval/trace/safety/cost tests
+doc/
+  course/                    # TASK.md + 00-课程大纲.md (curriculum)
+  harness-1hour.html         # one-hour interactive study guide
 ```
 
 ## Install
@@ -54,7 +119,34 @@ python -m pytest tests/test_harness.py -q
 ```
 
 20 tests cover persistence, accounting, budget auto-transition, resume, blocked
-audit, and a full manual lifecycle.
+audit, and a full manual lifecycle. The other layers add: `goal_loop` 21,
+`context_compaction` 6, `hippocampus` 5, and `harness_layers` 15.
+
+## Goal loop usage
+
+```python
+from pathlib import Path
+
+from goal_loop import GoalLoopRunner, GoalSpec
+from goal_persistence import GoalRuntime, GoalStore
+
+spec = GoalSpec.from_markdown("goal.md")  # human-authored contract
+runtime = GoalRuntime(GoalStore("goals.db"))
+
+runner = GoalLoopRunner(
+    spec,
+    runtime,
+    maker,      # a callable (spec, state, steering) -> MakerOutput
+    checker,    # an independent callable (spec, output) -> CheckerOutput
+)
+
+status = runner.run("thread-1")
+assert status.value == "complete"
+```
+
+The loop only completes when every acceptance criterion is machine-verified and the
+independent checker returns a non-FAIL verdict. A maker's self-report never completes
+the goal.
 
 ## Usage
 
@@ -111,7 +203,7 @@ runtime.mark_complete("thread-1", "sandbox tests pass")
 ### LLM demo
 
 ```bash
-.\.venv\Scripts\python.exe llm_demo.py
+.\.venv\Scripts\python.exe examples\llm_demo.py
 ```
 
 Configuration (`.env`):

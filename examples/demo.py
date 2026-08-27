@@ -1,11 +1,13 @@
 """Demo of the goal persistence harness.
 
-Run after installing the package:
-    .venv\\Scripts\\activate
-    python demo.py
+Run from the repo root:
+    python examples/demo.py
 """
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from goal_persistence import GoalRuntime, GoalStatus, GoalStore
 

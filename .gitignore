@@ -4,3 +4,17 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db
+*.loop_state.json
+efficiency_report.json
+eff_archive/
+eff_memory/
+eff_*.txt
+goal_loop_demo_state/
+goal_loop_demo_artifact.txt
+*.jsonl
+compaction_archive/
+hippocampus_memory/
