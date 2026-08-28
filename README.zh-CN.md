@@ -152,11 +152,11 @@ tests/                       # 测试
 doc/
   course/                    # TASK.md + 00-课程大纲.md(课程)
   harness-1hour.html         # 一小时交互式学习指南
-journey.md                   # 项目完整历程(ME/YOU 双栏)
+JOURNEY.md                   # 项目完整历程(ME/YOU 双栏,中文)
 README.md / README.zh-CN.md  # 英文 / 中文说明
 ```
 
 ## 项目历程
 
-完整的两栏(ME/YOU)构建历程见 [`journey.md`](journey.md):从持久化内核到六层
+完整的两栏(ME/YOU)构建历程见 [`JOURNEY.md`](JOURNEY.md):从持久化内核到六层
 harness、两次外部审查、真正的组合接线,以及效率测量。
