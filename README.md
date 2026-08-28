@@ -14,6 +14,30 @@ plus the safety and cost-control cross-cuts:
 Distilled from the Codex goal feature and aligned with the *Agent Harness 101*
 curriculum.
 
+## Highlight features
+
+- **Two-layer goal system** — `goal_persistence` makes a goal durable (SQLite row,
+  idle self-start, anti-drift steering, resume, budget auto-transition); `goal_loop`
+  makes it *run* (parse `goal.md`, maker/checker split, machine verification, stop
+  conditions).
+- **Generator/evaluator separation** — a maker's self-report never completes a goal;
+  only an independent checker verdict plus machine-verified acceptance criteria can.
+- **Composed runtime, not parallel toys** — `GoalLoopRunner` routes verification
+  through a fail-closed `sandbox`, logs to an append-only `observability` trace, and
+  records each round into `hippocampus` long-term memory.
+- **Fail-closed execution** — an unconfigured sandbox refuses with
+  `SANDBOX_UNAVAILABLE` instead of running bare; commands are allowlisted and run with
+  `shell=False`.
+- **Context compaction at 80%** — marked context stays verbatim, the rest is archived
+  and summarized when the window crosses 80%.
+- **Hippocampus long-term memory** — task trajectory → important-content index → local
+  cache → learn/unlearn/correct → replay/retrospect.
+- **Safety and cost cross-cuts** — RBAC + high-risk HITL + injection marker
+  (`safety/`); token-bucket rate limiter + tool-result cache (`cost_control/`).
+- **Measured, not asserted** — `examples/measure_efficiency.py` reports real numbers
+  (rounds, compaction ratio, replay latency, sandbox overhead) in
+  `doc/02_goal_loop/efficiency.md`.
+
 ## Modules
 
 | Module | What it owns | Source |
@@ -118,9 +142,8 @@ uv pip install -e ".[dev]"
 python -m pytest tests/test_harness.py -q
 ```
 
-20 tests cover persistence, accounting, budget auto-transition, resume, blocked
-audit, and a full manual lifecycle. The other layers add: `goal_loop` 21,
-`context_compaction` 6, `hippocampus` 5, and `harness_layers` 15.
+75 tests total: persistence 20, `goal_loop` 23, `context_compaction` 8, `hippocampus`
+6, `harness_layers` 16, and `efficiency` 2.
 
 ## Goal loop usage
 
