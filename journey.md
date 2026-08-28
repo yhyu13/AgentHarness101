@@ -9,6 +9,30 @@ This single journey merges the two earlier per-module histories
 chronological spine: the durable goal core first, then the loop and the six-layer
 harness on top.
 
+## 风险与待办(高亮)
+
+> 这里只做顶部索引;正文各 Era 中已经写到的风险/TODO 原样保留,不删除。
+
+### 当前风险
+
+- **沙箱是白名单执行器,不是 OS 级隔离** —— `sandbox/` 做的是 fail-closed + allowlist
+  + `shell=False` + 超时,没有 `bubblewrap`/`Landlock`/`seccomp` 那种真正的进程/文件
+  系统隔离。这是一个明确的边界,不是已完成项。
+- **评测是确定性裁判,不是 LLM-judge** —— `eval_harness/` 默认 `ExactJudge` 做相等
+  比较,可替换但尚未接入真实 LLM 裁判。
+- **循环组合了 sandbox + trace + hippocampus,但还没接 `tool_registry`** —— maker/
+  checker 目前是普通可调用对象,未经过工具注册表的权限门。
+- **token 计数在无 LLM 的循环里不可伪造** —— 测量里用墙钟时间而非脚本注入的 token;
+  真实 token 只在 `llm_demo.py` 里有意义。
+
+### 待办(TODO)
+
+- 用真实 LLM 跑一轮循环,报告*实际* token 用量(需要凭据)。
+- 扫描窗口大小,验证压缩比随上下文增长仍然成立。
+- 用一个永远无进展的 maker 测病态循环,给 blocked 路径定上界。
+- 把 maker/checker 接到 `tool_registry` 权限门,完成最后一层真实组合。
+- (可选)升级沙箱到真正的 OS 级隔离后端。
+
 ---
 
 ## Part 1 — Goal persistence (the durable core)
