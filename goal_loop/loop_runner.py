@@ -186,6 +186,7 @@ class GoalLoopRunner:
             maker_output: MakerOutput = self._maker(
                 self._spec, self._state, cont.steering_prompt
             )
+            maker_succeeded = maker_output.ok
             checker_output: CheckerOutput = self._checker(self._spec, maker_output)
 
             if self._trace_log is not None:
@@ -268,7 +269,10 @@ class GoalLoopRunner:
             # machine commands keep failing therefore never counts as progress, so it
             # cannot evade the blocked audit and still fail to complete forever.
             satisfied_now = set(criteria_satisfied)
-            round_made_progress = bool(satisfied_now - prev_satisfied)
+            # A round only counts as progress if the maker actually produced something
+            # AND at least one criterion newly satisfied. A blocked/crashed maker
+            # (ok=False) is no-progress even if a stub checker says PASS.
+            round_made_progress = maker_succeeded and bool(satisfied_now - prev_satisfied)
             prev_satisfied = satisfied_now
             if round_made_progress:
                 goal = self._runtime.unblock(thread_id)
@@ -284,7 +288,7 @@ class GoalLoopRunner:
             # Completion requires every criterion + independent pass verdict.
             all_satisfied = len(criteria_satisfied) == len(self._spec.acceptance_criteria)
             verdict_ok = checker_output.verdict in (Verdict.PASS, Verdict.ACCEPT_WITH_MINOR)
-            if all_satisfied and verdict_ok:
+            if all_satisfied and verdict_ok and maker_succeeded:
                 evidence = self._build_evidence(criteria_satisfied, results, checker_output)
                 goal = self._runtime.mark_complete(thread_id, evidence)
                 self._finalize(

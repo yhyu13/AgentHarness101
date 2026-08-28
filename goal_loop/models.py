@@ -184,6 +184,11 @@ class MakerOutput:
     ``self_verification`` is recorded for the loop state but is deliberately **not**
     trusted for the completion decision.
 
+    ``ok`` is a machine-level signal (did the maker actually produce something?) —
+    distinct from the maker's own ``self_verification`` claim. A maker that was blocked
+    or crashed returns ``ok=False``; the loop must then treat the round as no-progress
+    regardless of any stub checker verdict.
+
     ``tokens_used`` is the honest accounting delta for the maker's work this round
     (input + output). It feeds the durable budget; the loop never invents a number.
     """
@@ -193,6 +198,7 @@ class MakerOutput:
     self_verification: str = ""
     risks: str = ""
     tokens_used: int = 0
+    ok: bool = True
 
 
 @dataclass(frozen=True, slots=True)

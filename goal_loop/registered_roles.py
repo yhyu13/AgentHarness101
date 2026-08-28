@@ -45,7 +45,11 @@ class RegisteredMaker:
             self._tool_name, {"objective": spec.objective}
         )
         if not result.ok:
-            return MakerOutput(summary=f"maker tool blocked: {result.error}", tokens_used=0)
+            return MakerOutput(
+                summary=f"maker tool blocked: {result.error}",
+                tokens_used=0,
+                ok=False,
+            )
         return result.output
 
 
