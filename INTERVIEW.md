@@ -20,6 +20,17 @@
 
 长对话越长越贵、也越容易跑偏。我做了个 80% 截断：对话中标记重要内容，上下文快满的时候，只留标记的部分原样，其余归档到磁盘并生成摘要，把「摘要 + 归档引用」喂回去。实测 48,550 字符能压到 609 字符（98.75% 缩减），重要内容一个没丢。
 
+核心就一句话：过线才压，压的时候只保重要的。
+
+```python
+# context_compaction/compactor.py
+total = sum(len(i.content) for i in items)
+if total <= int(self._threshold_ratio * window_size):   # 没过 80%，不动
+    return CompactionResult(kept=items, compact_occurred=False)
+kept = [i for i in items if i.important]                 # 只留标记的
+return self._compact_material(items, archive_dir, name) # 其余归档 + 摘要
+```
+
 留痕：`context_compaction/compactor.py:41`（`compact_window` 实现 80% 窗口）、
 `context_compaction/compactor.py:93`（归档 + 摘要）、
 `tests/test_context_compaction.py:90`（`test_window_80_percent_triggers_compaction`）、
@@ -30,6 +41,17 @@
 
 工具不是越多越好，模型选错的概率会涨。我做了个注册表：每个工具有权限标签（读/写/执行/网络），按任务显式启用，参数做 schema 校验。默认最小权限，不启用就不能调。
 
+核心是「先过权限门，再过参数校验，最后才调 handler」。
+
+```python
+# tool_registry/registry.py
+if reg.spec.permission not in self._enabled.get(name, set()):
+    return ToolResult(ok=False, error="permission not enabled")
+if validation_error := self._validate(reg.spec.parameters_schema, parameters):
+    return ToolResult(ok=False, error=validation_error)
+return ToolResult(ok=True, output=reg.handler(**parameters))
+```
+
 留痕：`tool_registry/registry.py:9`（`ToolRegistry`）、`tool_registry/registry.py:38`
 （`call` 里的权限门 + schema 校验）、`tool_registry/models.py:6`（`Permission` 枚举）。
 测试：`tests/test_harness_layers.py:34`（`test_permission_gate`）、
@@ -39,6 +61,17 @@
 
 这是最关键的层。命令必须走白名单 + `shell=False`（防注入）+ 超时。最关键的是**失败就关闭**：没配沙箱后端就返回 `SANDBOX_UNAVAILABLE` 拒绝执行，绝不裸跑。实测加这层只多 5% 开销。
 
+核心是「没配置就拒绝，不白名单就拒绝」。
+
+```python
+# sandbox/sandbox.py
+if not self.available:
+    return SandboxResult(blocked=True, reason="SANDBOX_UNAVAILABLE")
+if argv[0] not in self._allowlist:
+    return self._blocked(f"not allowlisted: {argv[0]}")
+proc = subprocess.run(argv, shell=False, timeout=self._timeout_s)  # 关 shell 防注入
+```
+
 留痕：`sandbox/sandbox.py:46`（`run` 里的 fail-closed + 白名单）、
 `sandbox/sandbox.py:95`（`_blocked`）。测试：`tests/test_harness_layers.py:63`
 （`test_fail_closed_when_unavailable`）、`tests/test_adversarial_boundaries.py:155`
@@ -47,6 +80,26 @@
 ### 4. 状态与记忆
 
 分两层：一是**持久化目标**——一个目标存成 SQLite 一行，带状态机（active/paused/blocked/complete 等），重启能续跑，超预算自动停；二是**长期记忆**（我管它叫「海马体」）——记录任务轨迹、索引重要内容、存本地缓存，能「学习正确、忘掉错误」，还能回放。
+
+核心是「阻塞要连续 3 次才真 blocked，不是模型喊一声就放弃」。
+
+```python
+# goal_persistence/runtime.py
+new_count = goal.blocked_count + 1
+if new_count >= self.BLOCKED_THRESHOLD:          # 连续 3 次才翻转
+    return self._store.transition(thread_id, GoalStatus.BLOCKED, reason)
+goal.blocked_count = new_count                    # 不够就只记数，不 flip
+```
+
+记忆侧的核心是「删索引的时候连缓存一起删，别留脏数据」。
+
+```python
+# hippocampus/store.py
+def forget_fact(self, key):
+    del self._index[key]
+    self._delete_cache(key)   # 同一个操作里把缓存也清掉
+    return True
+```
 
 留痕：`goal_persistence/store.py:64`（`GoalStore` + SQLite）、
 `goal_persistence/models.py:9`（`GoalStatus` 状态机 + 迁移规则）、
@@ -63,6 +116,17 @@
 
 这里有条我特别想讲的原则：**写代码的人不能给自己批作业。** 所以我把「maker」（干活）和「checker」（独立验收）拆成两个角色。完成必须同时满足：① 每个验收标准的机器命令真的退出码 0；② 独立 checker 给 pass。maker 自己说「做完了」不算数。
 
+核心是完成判定要同时过三道关：准则全过 + 独立 verdict + maker 真成了。
+
+```python
+# goal_loop/loop_runner.py
+maker_succeeded = maker_output.ok                    # maker 有没有真产出
+all_satisfied = len(criteria_satisfied) == len(spec.acceptance_criteria)
+verdict_ok = checker_output.verdict in (PASS, ACCEPT_WITH_MINOR)
+if all_satisfied and verdict_ok and maker_succeeded:  # 三关都过才 complete
+    runtime.mark_complete(thread_id, evidence)
+```
+
 留痕：`goal_loop/loop_runner.py:83`（`_verify_criterion` 命令验证）、
 `goal_loop/loop_runner.py:291`（完成判定 `all_satisfied and verdict_ok and maker_succeeded`）、
 `goal_loop/roles.py:8`（Maker 协议）和 `goal_loop/roles.py:21`（Checker 协议）。
@@ -73,12 +137,34 @@
 
 出问题不能只剩一句「抱歉失败了」。我做了 append-only 的 trace 日志，每个事件一条 JSON，能字节级重建当时模型看到的东西。这就是「可回放」。
 
+核心是「append-only + 顺序号」，重启后 seq 接着涨，回放按序还原。
+
+```python
+# observability/trace.py
+def append(self, event_type, payload):
+    event = TraceEvent(seq=self._next_seq, event_type=event_type, payload=payload)
+    self._file.write(json.dumps(event) + "\n")   # 每条一行，只追加
+    self._next_seq += 1
+```
+
 留痕：`observability/trace.py:19`（`TraceLog`）、`observability/trace.py:32`（`append`）、
 `observability/trace.py:43`（`replay`）。测试：`tests/test_harness_layers.py:101`
 （`test_append_only_and_replay`）、`tests/test_adversarial_boundaries.py:163`
 （`test_trace_survives_restart_and_reconstructs_exactly`）。
 
 另外两个横切面：**安全**（RBAC 角色 + 高风险动作人机确认 + 注入检测）和**成本控制**（令牌桶限流 + 工具结果缓存）。
+
+安全侧核心是「高风险动作先挂起等人批」；成本侧核心是「令牌桶先问过不过」。
+
+```python
+# safety/safety.py
+if risk == "high":
+    return Decision(Approval.PENDING, "human approval required")
+
+# cost_control/cost.py
+def allow(self):
+    ...  # 令牌桶：桶里没令牌就 False，防止打爆 provider
+```
 
 留痕：`safety/safety.py:34`（`SafetyGuard` 的 RBAC + HITL）、`safety/safety.py:66`
 （`check_prompt` 注入检测）；`cost_control/cost.py:17`（`RateLimiter`）、
@@ -94,6 +180,17 @@
 当时我把 maker/checker 接进工具权限门。结果发现：maker 被权限拦下时，代码只改了个字符串说明「被拦了」，没有返回任何「失败」信号。于是出现一个假完成：**maker 没干成活 → 但我配了个说 pass 的 stub checker → 再加上这条验收标准没有机器命令 → 循环就误判完成了。** 这直接击穿了「写代码的人不能自批作业」这条原则。
 
 修法很简单但关键：给 maker 输出加了个 `ok` 字段，被拦就返回 `ok=False`，循环的进度和完成判定都强制要求 maker 真成功了。然后我写了 6 个「对抗测试」——专门构造恶意场景打边界，不是再写一个 happy path。
+
+修复的核心就三行：被拦时明确说「我没成」。
+
+```python
+# goal_loop/registered_roles.py（修复后）
+if not result.ok:
+    return MakerOutput(
+        summary=f"blocked: {result.error}",
+        ok=False,        # 关键：机器级失败信号，不再只改字符串
+    )
+```
 
 留痕：bug 根因在 `goal_loop/registered_roles.py:43`（被拦时原本只返回字符串，无失败信号）；
 修复在 `goal_loop/models.py:181`（`MakerOutput` 加 `ok` 字段）、
