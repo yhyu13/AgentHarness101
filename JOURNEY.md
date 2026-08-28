@@ -19,10 +19,14 @@
   进程/文件系统隔离。这是明确的边界,不是已完成项。
 - **评测是确定性裁判,不是 LLM-judge**(Era 18):`eval_harness/` 默认用 `ExactJudge`
   做相等比较,可替换但尚未接入真实 LLM 裁判。
-- **循环组合了 sandbox + trace + hippocampus,但还没接 `tool_registry`**(Era 19):
-  maker/checker 目前是普通可调用对象,未经过工具注册表的权限门。
+- **循环组合了 sandbox + trace + hippocampus + `tool_registry`**(Era 19, 已解决):
+  `goal_loop/registered_roles.py` 把 maker/checker 变成经权限门 + schema 校验的注册
+  工具;原「还没接 tool_registry」的风险已在 Era 22 关闭。
 - **无 LLM 循环里 token 计数不可伪造**(Era 20):测量用墙钟时间而非脚本注入的 token;
   真实 token 只在 `llm_demo.py` 里才有意义。
+- **generator/evaluator 分离会被「被拦 maker + stub PASS checker + 无命令准则」击穿**
+  (Era 23, 已修复):`MakerOutput` 曾没有机器级失败信号,导致被权限门拦下的 maker
+  在 stub checker 说 PASS 时可能误判完成。已加 `ok` 字段并用对抗测试钉住。
 
 ### 待办(TODO)
 
@@ -184,6 +188,12 @@
 |---|---|
 | 从 `JOURNEY.md` 顶部贴出四条 TODO,要求落实。 | 逐一落地并验证:① 真实 LLM 跑循环 —— `examples/llm_goal_loop.py` 用 MiniMax-M3,2 轮、`complete`、75 实际 token;② 窗口扫描 —— 新测试证明压缩比随上下文增长仍成立;③ 病态循环 —— 新测试证明无进展 maker 三击 BLOCKED;④ `tool_registry` 接线 —— 新增 `RegisteredMaker`/`RegisteredChecker`,把 maker/checker 变成经权限门 + schema 校验的注册工具。套件 75 → 79 全绿。 |
 
+### Era 23 — 对抗边界测试:打穿一个真 bug
+
+| ME | YOU |
+|---|---|
+| "能不来一个完整的难一点的测试测测我们的边界?" | 没有写又一个 happy path,而是写了一套对抗测试 `tests/test_adversarial_boundaries.py`,并在此过程中抓到一个真 bug:`RegisteredMaker` 被权限门拦下时只改 `summary`、不返回任何失败信号,导致「被拦 maker + stub PASS checker + 无 `@verify` 命令的准则」会误判完成——generator/evaluator 分离被击穿。修复:`MakerOutput` 加 `ok` 字段(默认 `True` 向后兼容),被拦 maker 返回 `ok=False`,`loop_runner` 的进度判定和完成判定都要求 `maker_succeeded`。新增 6 个对抗测试覆盖:被拦 maker 不得 complete、说谎 checker 不得绕过失败命令、预算耗尽为硬终态、空配置沙箱 fail-closed、trace 跨重启字节级重建。套件 79 → 85 全绿。 |
+
 ---
 
 ## 这个项目如何教 vibe coding with AI
@@ -203,6 +213,7 @@
 - **用具体 diff 自我批判。** 计划和实现都对照一张命名缺陷清单被修改。*(Era 11、Era 12)*
 - **把硬评审当新证据。** 早先的「完成」是假阳性;基于评审重开工作,把状态机草稿变成真 harness。*(Era 14)*
 - **组合,而不是共存。** 「六个并排玩具」评审逼出真接线(循环 → 沙箱 → trace → 海马体),用测试而非散文证明。*(Era 19)*
+- **用对抗测试打穿边界,而不是再写一个 happy path。** 用户要「难一点的测试」时,针对性构造「被拦 maker + 说谎 checker」的组合,才暴露 `MakerOutput` 缺失败信号的假完成漏洞。*(Era 23)*
 
 ### 可复用的规则
 
@@ -213,6 +224,7 @@
 5. **「测试绿了」只证明测试覆盖到的东西。** 第一次绿是在 stub maker/checker 上;评审把缺口变具体。*(Era 14)*
 6. **「层存在」不等于「层组合」。** 第二次评审逼出真接线,由组合测试证明。*(Era 19)*
 7. **用真实数字测量,不用注入常量。** 一个伪造的 token 节省指标被抓住并移除;最终报告说明每个数字证明什么。*(Era 20)*
+8. **generator/evaluator 分离要防「自报失败」这一侧。** checker 自夸不算数,同理 maker 被拦/崩溃也不能算成功——`ok=False` 必须让整轮归零为无进展。*(Era 23)*
 
 ### 一句话总结
 
