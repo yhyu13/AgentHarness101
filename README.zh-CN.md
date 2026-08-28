@@ -72,7 +72,7 @@ uv pip install -e ".[dev]"
 python -m pytest tests -q
 ```
 
-当前 75 个测试全绿:持久化 20、goal_loop 23、上下文压缩 8、海马体 6、其余层 16、
+当前 79 个测试全绿:持久化 20、goal_loop 27、上下文压缩 9、海马体 6、其余层 16、
 效率 2。
 
 ## goal_loop 用法

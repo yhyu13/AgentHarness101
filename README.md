@@ -53,6 +53,10 @@ curriculum.
 | `safety/` | RBAC roles, high-risk HITL, prompt-injection marker | Study guide M6 |
 | `cost_control/` | Token-bucket rate limiter + tool-result cache | Study guide M5.7 |
 
+`goal_loop` also ships `registered_roles.py`, which routes the maker/checker through a
+`ToolRegistry` permission gate — so the last "parallel toys" gap (loop → tool registry)
+is closed by construction, not by prose.
+
 The `goal_loop` composes the persistence layer rather than reimplementing it:
 `GoalLoopRunner` drives `GoalRuntime` for durable goals, and delegates the
 blocked/complete audits to it. The other layers are independent and compose the same
@@ -114,6 +118,7 @@ examples/                    # runnable demos (run from repo root)
   demo.py                    # goal persistence demo
   goal_loop_demo.py          # fail-then-pass loop demo
   llm_demo.py                # real LLM demo (needs ANTHROPIC_AUTH_TOKEN)
+  llm_goal_loop.py           # real LLM maker + machine checker (needs MINIMAX_API_KEY)
   context_compaction_demo.py # 80% cutoff demo
   hippocampus_demo.py        # trajectory + learn/unlearn + replay demo
   harness_layers_demo.py     # registry/sandbox/eval/trace/safety/cost demo
@@ -142,7 +147,7 @@ uv pip install -e ".[dev]"
 python -m pytest tests/test_harness.py -q
 ```
 
-75 tests total: persistence 20, `goal_loop` 23, `context_compaction` 8, `hippocampus`
+79 tests total: persistence 20, `goal_loop` 27, `context_compaction` 9, `hippocampus`
 6, `harness_layers` 16, and `efficiency` 2.
 
 ## Goal loop usage

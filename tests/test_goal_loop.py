@@ -26,6 +26,8 @@ from goal_persistence import GoalRuntime, GoalStatus, GoalStore
 from sandbox import Sandbox
 from observability import TraceLog
 from hippocampus import Hippocampus, HippocampusStore
+from tool_registry import Permission, ToolRegistry, ToolSpec
+from goal_loop.registered_roles import RegisteredChecker, RegisteredMaker
 
 
 @pytest.fixture
@@ -380,6 +382,32 @@ class TestGoalLoopRunner:
         assert status == GoalStatus.BLOCKED
         assert runner._state.status == "blocked"
 
+    def test_never_progressing_maker_bounds_blocked_path(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        # A maker that never satisfies anything must hit BLOCKED after the
+        # three-strike rule, not spin forever.
+        class NeverProgress:
+            def __call__(self, spec, state, steering):
+                from goal_loop import MakerOutput
+
+                return MakerOutput(summary="no progress", tokens_used=0)
+
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            NeverProgress(),
+            StaticChecker(Verdict.FAIL),
+            state_dir=tmp_path,
+        )
+        status = runner.run("t1")
+        assert status == GoalStatus.BLOCKED
+        # The blocked path is bounded: it stops at the three-strike threshold.
+        assert runtime.get_goal("t1").blocked_count >= 3
+
     def test_composes_sandbox_trace_and_hippocampus(
         self, runtime: GoalRuntime, tmp_path: Path
     ) -> None:
@@ -453,5 +481,53 @@ class TestGoalLoopRunner:
             ArtifactChecker(artifact),
             state_dir=tmp_path,
         )
+        status = runner.run("t1")
+        assert status != GoalStatus.COMPLETE
+
+    def test_maker_checker_route_through_tool_registry(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        registry = ToolRegistry()
+
+        def make_handler(objective: str):
+            from goal_loop import MakerOutput
+
+            return MakerOutput(summary=f"made {objective}", tokens_used=1)
+
+        def check_handler(summary: str):
+            from goal_loop import CheckerOutput, Verdict
+
+            return CheckerOutput(verdict=Verdict.PASS, tokens_used=1)
+
+        maker = RegisteredMaker(registry, "make", make_handler)
+        checker = RegisteredChecker(registry, "check", check_handler)
+
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "checker-decided")],
+        )
+        runner = GoalLoopRunner(spec, runtime, maker, checker, state_dir=tmp_path)
+        status = runner.run("t1")
+        assert status == GoalStatus.COMPLETE
+
+    def test_maker_blocked_by_registry_does_not_complete(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        registry = ToolRegistry()
+
+        def make_handler(objective: str):
+            from goal_loop import MakerOutput
+
+            return MakerOutput(summary="should not run", tokens_used=1)
+
+        maker = RegisteredMaker(registry, "make", make_handler)
+        # Disable the write permission: the maker tool is now blocked.
+        registry.disable("make", Permission.WRITE)
+        checker = StaticChecker(Verdict.PASS)
+
+        spec = make_spec(
+            max_rounds=1,
+            criteria=[AcceptanceCriterion("c1", "must write file", verify_command="py -c \"raise SystemExit(1)\"")],
+        )
+        runner = GoalLoopRunner(spec, runtime, maker, checker, state_dir=tmp_path)
         status = runner.run("t1")
         assert status != GoalStatus.COMPLETE

@@ -105,3 +105,27 @@ def test_window_80_percent_triggers_compaction(tmp_path: Path) -> None:
 def test_window_rejects_nonpositive(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         ContextCompactor(threshold=0).compact_window([], window_size=0, archive_dir=tmp_path, archive_name="x")
+
+
+def test_reduction_ratio_holds_as_window_grows(tmp_path: Path) -> None:
+    """Sweep window size; the reduction ratio stays low (compaction keeps working)
+    while a fixed number of important items are preserved verbatim."""
+    compactor = ContextCompactor(threshold=0, threshold_ratio=0.8)
+
+    ratios = []
+    for n_noise in (10, 100, 500):
+        items = [item(f"imp-{i}", f"CRITICAL {i}", important=True) for i in range(10)]
+        items += [
+            item(f"noise-{i}", f"verbose line {i} " * 20) for i in range(n_noise)
+        ]
+        total = sum(len(i.content) for i in items)
+        result = compactor.compact_window(
+            items, window_size=total, archive_dir=tmp_path, archive_name=f"sweep-{n_noise}.json"
+        )
+        out = sum(len(i.content) for i in result.kept) + len(result.summary)
+        ratios.append(out / total)
+
+    # As the context grows, the ratio stays well below 1 (compaction still wins).
+    assert all(r < 0.3 for r in ratios), ratios
+    # And it trends downward (more noise = more compression).
+    assert ratios[-1] <= ratios[0], ratios
