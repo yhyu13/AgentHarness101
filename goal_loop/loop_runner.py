@@ -19,6 +19,7 @@ from goal_loop.models import (
 )
 from goal_loop.roles import Checker, Maker
 from goal_loop.verifier import CommandVerifier
+from goal_loop.world_verifier import WorldVerifier
 from goal_persistence import GoalRuntime, GoalStatus
 from sandbox import Sandbox
 from observability import TraceLog
@@ -48,6 +49,7 @@ class GoalLoopRunner:
         sandbox: Sandbox | None = None,
         trace_log: TraceLog | None = None,
         hippocampus: Hippocampus | None = None,
+        world_verifier: WorldVerifier | None = None,
     ) -> None:
         self._spec = spec
         self._runtime = runtime
@@ -57,9 +59,19 @@ class GoalLoopRunner:
         self._sandbox = sandbox
         self._trace_log = trace_log
         self._hippocampus = hippocampus
+        self._world_verifier = world_verifier
         self._state_dir = Path(state_dir) if state_dir else Path(".")
         self._state = LoopState(loop_name=spec.objective)
         self._thread_id: Optional[str] = None
+
+    @property
+    def state(self) -> LoopState:
+        """The loop's durable state — rounds, blockers, and final result.
+
+        Exposed read-only for inspection (e.g. per-round traces); callers must not
+        mutate it.
+        """
+        return self._state
 
     # ------------------------------------------------------------------ helpers
 
@@ -183,11 +195,20 @@ class GoalLoopRunner:
                 )
                 break
 
-            maker_output: MakerOutput = self._maker(
-                self._spec, self._state, cont.steering_prompt
-            )
+            try:
+                maker_output: MakerOutput = self._maker(
+                    self._spec, self._state, cont.steering_prompt
+                )
+            except Exception as exc:  # fail closed: a crashed maker is no-progress, never a crash
+                maker_output = MakerOutput(
+                    summary=f"maker crashed: {type(exc).__name__}: {exc}",
+                    ok=False,
+                )
             maker_succeeded = maker_output.ok
-            checker_output: CheckerOutput = self._checker(self._spec, maker_output)
+            try:
+                checker_output: CheckerOutput = self._checker(self._spec, maker_output)
+            except Exception as exc:  # fail closed: a crashed checker is a FAIL verdict, never a crash
+                checker_output = CheckerOutput(verdict=Verdict.FAIL, tokens_used=0)
 
             if self._trace_log is not None:
                 self._trace_log.append(
@@ -285,10 +306,16 @@ class GoalLoopRunner:
                     self._finalize("blocked", "No progress threshold reached")
                     break
 
-            # Completion requires every criterion + independent pass verdict.
+            # Completion requires every criterion + independent pass verdict + world
+            # evidence (when a world verifier is wired in). Fail-closed: a world
+            # verification failure blocks completion even when commands exit 0 and the
+            # checker says PASS.
             all_satisfied = len(criteria_satisfied) == len(self._spec.acceptance_criteria)
             verdict_ok = checker_output.verdict in (Verdict.PASS, Verdict.ACCEPT_WITH_MINOR)
-            if all_satisfied and verdict_ok and maker_succeeded:
+            world_ok = (
+                self._world_verifier.verify_all().ok if self._world_verifier else True
+            )
+            if all_satisfied and verdict_ok and maker_succeeded and world_ok:
                 evidence = self._build_evidence(criteria_satisfied, results, checker_output)
                 goal = self._runtime.mark_complete(thread_id, evidence)
                 self._finalize(
@@ -298,6 +325,41 @@ class GoalLoopRunner:
                 break
 
         return goal.status
+
+    def run_until_terminal(
+        self,
+        thread_id: str,
+        budget_tokens: Optional[int] = None,
+        budget_wall_ms: Optional[int] = None,
+        max_crashes: int = 3,
+    ) -> GoalStatus:
+        """Event-driven driver: run until the goal is no longer active.
+
+        Unlike a timer, this never sleeps between runs: when ``run`` returns while the
+        goal is still ACTIVE (e.g. stopped at ``max_rounds``), it re-runs immediately.
+
+        A transient crash in ``run`` (connection reset, schema failure) is retried on
+        the same thread up to ``max_crashes`` times, so transient failures resume in
+        place instead of restarting from scratch. A persistent crash (``max_crashes``
+        consecutive failures) propagates rather than spinning forever.
+        """
+        crashes = 0
+        while True:
+            try:
+                status = self.run(
+                    thread_id,
+                    budget_tokens=budget_tokens,
+                    budget_wall_ms=budget_wall_ms,
+                )
+            except Exception:
+                crashes += 1
+                if crashes >= max_crashes:
+                    raise
+                continue
+            crashes = 0
+            if status != GoalStatus.ACTIVE:
+                return status
+            # Still ACTIVE (e.g. stopped at max_rounds): continue immediately, no sleep.
 
     def _finalize(self, status: str, summary: str) -> None:
         self._state.status = status

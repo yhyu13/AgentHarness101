@@ -531,3 +531,120 @@ class TestGoalLoopRunner:
         runner = GoalLoopRunner(spec, runtime, maker, checker, state_dir=tmp_path)
         status = runner.run("t1")
         assert status != GoalStatus.COMPLETE
+
+    def test_run_until_terminal_continues_past_max_rounds(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        # Event-driven, not timed: a run stopped at max_rounds while still ACTIVE must
+        # be driven again immediately by run_until_terminal until completion.
+        spec = make_spec(
+            max_rounds=1,
+            criteria=[AcceptanceCriterion("c1", "checker-decided")],
+        )
+
+        calls = {"n": 0}
+
+        def fail_then_pass_checker(spec, maker_output):
+            from goal_loop import CheckerOutput
+
+            calls["n"] += 1
+            verdict = Verdict.FAIL if calls["n"] == 1 else Verdict.PASS
+            return CheckerOutput(verdict=verdict, tokens_used=1)
+
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("attempt"),
+            fail_then_pass_checker,
+            state_dir=tmp_path,
+        )
+        status = runner.run_until_terminal("t1")
+        assert status == GoalStatus.COMPLETE
+        # Round numbering advanced across runs, proving continuation, not restart.
+        assert runner.state.current_round >= 2
+
+    def test_run_until_terminal_retries_transient_crash_in_place(
+        self, runtime: GoalRuntime, tmp_path: Path, monkeypatch
+    ) -> None:
+        # A transient crash (e.g. connection reset) after some progress must be retried
+        # on the SAME thread, resuming rather than restarting or losing progress.
+        spec = make_spec(
+            max_rounds=1,
+            criteria=[AcceptanceCriterion("c1", "checker-decided")],
+        )
+
+        calls = {"n": 0}
+
+        def fail_then_pass_checker(spec, maker_output):
+            from goal_loop import CheckerOutput
+
+            calls["n"] += 1
+            verdict = Verdict.FAIL if calls["n"] == 1 else Verdict.PASS
+            return CheckerOutput(verdict=verdict, tokens_used=1)
+
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("attempt"),
+            fail_then_pass_checker,
+            state_dir=tmp_path,
+        )
+
+        real_run = runner.run
+        run_calls = {"n": 0}
+
+        def flaky_run(*args, **kwargs):
+            run_calls["n"] += 1
+            if run_calls["n"] == 2:
+                raise ConnectionError("transient reset")
+            return real_run(*args, **kwargs)
+
+        monkeypatch.setattr(runner, "run", flaky_run)
+        status = runner.run_until_terminal("t1")
+
+        assert status == GoalStatus.COMPLETE
+        assert run_calls["n"] == 3  # round 1 (FAIL), crash, resume -> complete
+        assert runner.state.current_round == 2  # continued, not restarted
+
+    def test_run_until_terminal_raises_after_persistent_crash(
+        self, runtime: GoalRuntime, tmp_path: Path, monkeypatch
+    ) -> None:
+        # A persistent crash (>= max_crashes consecutive failures) must propagate,
+        # not retry forever. This is the anti-spin bound on transient-failure recovery.
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "checker-decided")],
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("attempt"),
+            StaticChecker(Verdict.PASS),
+            state_dir=tmp_path,
+        )
+
+        def always_crash(*args, **kwargs):
+            raise ConnectionError("persistent reset")
+
+        monkeypatch.setattr(runner, "run", always_crash)
+        with pytest.raises(ConnectionError):
+            runner.run_until_terminal("t1", max_crashes=2)
+
+    def test_run_until_terminal_stops_at_blocked(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        # The other half of "run without stopping": when the goal hits the three-strike
+        # BLOCKED terminal-ish state, run_until_terminal must return it and stop, not
+        # keep driving a no-progress goal forever.
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("attempt"),
+            StaticChecker(Verdict.FAIL),
+            state_dir=tmp_path,
+        )
+        status = runner.run_until_terminal("t1")
+        assert status == GoalStatus.BLOCKED
+        assert runtime.get_goal("t1").status == GoalStatus.BLOCKED

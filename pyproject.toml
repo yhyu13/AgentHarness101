@@ -10,8 +10,34 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=7.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.coverage.run]
+source = [
+    "goal_persistence",
+    "goal_loop",
+    "context_compaction",
+    "hippocampus",
+    "tool_registry",
+    "sandbox",
+    "eval_harness",
+    "observability",
+    "safety",
+    "cost_control",
+    "faux_provider",
+]
+branch = true
+omit = [
+    "tests/*",
+    "examples/*",
+]
+
+[tool.coverage.report]
+fail_under = 92
+show_missing = true
+precision = 2

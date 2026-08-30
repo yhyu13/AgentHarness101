@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -30,6 +31,9 @@ class Decision:
     reason: str = ""
 
 
+_HIGH_RISK_ACTIONS = frozenset({"deploy", "delete", "drop", "purge", "format", "rm", "rmdir"})
+
+
 @dataclass
 class SafetyGuard:
     """Layer-M6 safety: RBAC roles + high-risk HITL + prompt-injection marker.
@@ -53,8 +57,9 @@ class SafetyGuard:
         allowed = action in self._role_allowlist.get(self.role, set())
         if not allowed:
             return Decision(Approval.DENIED, f"action {action} not allowed for role {self.role}")
-        if risk == "high":
-            # High-risk actions always require a human decision.
+        if risk == "high" or action in _HIGH_RISK_ACTIONS:
+            # High-risk actions always require a human decision — the caller's risk
+            # label cannot downgrade an intrinsically high-risk action.
             return Decision(Approval.PENDING, "human approval required for high-risk action")
         return Decision(Approval.APPROVED)
 
@@ -67,9 +72,11 @@ class SafetyGuard:
         """Return True if the content looks like a prompt-injection attempt."""
         markers = [
             "ignore previous instructions",
+            "ignore all previous instructions",
             "ignore all instructions",
             "ignore your instructions",
             "you are now",
         ]
-        lowered = content.lower()
+        # Normalize whitespace so "Ignore   ALL Previous Instructions" still matches.
+        lowered = re.sub(r"\s+", " ", content.lower())
         return any(m in lowered for m in markers)

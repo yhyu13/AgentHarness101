@@ -197,6 +197,60 @@
 
 ---
 
+## 第四部分 — TDD 对比与三目标实现
+
+### Era 24 — 对比四个 reference harness
+
+| ME | YOU |
+|---|---|
+| 给了四个 reference harness 路径（deepseek-harness / codex / learn-harness-engineering / pi），让对比 TDD 做法，找共同模式和差异。 | 读四个仓库，得出核心结论：它们谈的不是同一个「TDD」，而是三个不同问题——A（怎么测 harness 代码）、B（怎么确定性测 agent loop）、C（怎么让 agent 自己证明工作）。共同点只有一条：**只 mock LLM 边界，其余跑真货**。写成 `doc/reference_harness/comparison.md`。 |
+
+### Era 25 — 三个 plan + 派子代理
+
+| ME | YOU |
+|---|---|
+| 让 dump 中文 doc + 每个目标写 plan doc + 用 software-dev-loop 派子代理实现，实现后用 tdd 测，出错返工到全绿。 | 写三个 plan（各含自我批判），把三问映射成本仓库的三个可实施目标：① red-green + 覆盖率闸门；② faux provider；③ verify the world。派 3 个子代理并行，各走 red→green + benchmark + 自己的 journey。 |
+
+### Era 26 — 实现与返工
+
+| ME | YOU |
+|---|---|
+| （子代理实现中。） | 三目标落地：coverage `fail_under=92` + `scripts/check.sh` + AGENTS 测试纪律；`faux_provider/`（FauxProvider+FauxMaker，13 测试，确定性 diff=0）；`goal_loop/world_verifier.py` + loop_runner 最小接线（9 测试，误完成率 0/5）。 |
+
+### Era 27 — 收口验证 + 抓一个集成 bug
+
+| ME | YOU |
+|---|---|
+| （没纠正。） | 全量 110 passed。自查发现目标 2 新包 `faux_provider` 没进覆盖率 `source`，补进去后目标 1 的 meta-test 因硬编码精确列表而红——返工把断言从 `==` 改成子集，并加 `.coverage` 进 `.gitignore`。最终 110 passed，覆盖率 92.58% ≥ 92。 |
+
+### 风险 / TODO
+
+- ✅ `faux_provider/provider.py:121-124` 4 行未覆盖已解决：判为**行为**（`stream()` 的分块语义，非死代码），补确定性测试（monkeypatch `time.sleep`）转绿，`faux_provider/provider.py` 覆盖率 100%。
+- `crashed maker` 在 loop 里抛 RuntimeError（goal 停 `active`，不误判 complete）——现有行为，是否在 `run()` 兜底待定。
+- 真 LLM 基线要 key，`doc/04_faux_provider/benchmark.md` 里标了 `待确认`，没编数字。
+
+---
+
+### Era 28 — 全系统 E2E 测试，一次通过
+
+| ME | YOU |
+|---|---|
+| 「来个全系统级别的测试，有错误就返工，全部正确才通。」 | 写 `tests/test_system_e2e.py`：一次真实 `run()` 串起 8 层（faux + persistence + loop + sandbox + trace + hippocampus + world_verifier + checker），happy path 到 `complete`，对抗 path（假 exit-0 + 说谎 checker + 错产物）被 world verifier 拦到 `blocked`。2 passed，一次通过，无需返工。 |
+
+关键：对抗场景要 4 个脚本回复（第 1 轮假 exit-0 使准则「满足」算 progress，之后 3 次无进展才触 `BLOCKED_THRESHOLD=3`）；`@verify` 命令用无引号的 `py -c` + 正斜杠路径，避开 Windows 反斜杠被 `shlex.split` 吞掉。
+
+---
+
+### Era 29 — 红蓝对抗：红队打洞，蓝队补
+
+| ME | YOU |
+|---|---|
+| 「设计红队实验，制造失败，然后蓝队修复失败。」 | 红队写 `tests/test_red_team.py` 4 个攻击先跑红（崩溃 maker/checker 击穿 loop、注入变体 `Ignore ALL Previous Instructions` 漏报、`deploy` 标 `risk=low` 绕过 HITL）；蓝队修：`loop_runner` 捕获 maker/checker 异常 fail-closed（崩溃→`ok=False`/`FAIL`→三振 blocked）、`safety` 加 `_HIGH_RISK_ACTIONS` 内置（不信任自报风险）+ 注入 marker 补 `all previous` + 空白归一化。4 攻击转绿，全量 116 passed，漏洞记 `.wolf/buglog.json`。 |
+
+教训：蓝队修复时 edit `safety.py` 的类定义，oldString 锚「类名行」误删 docstring 首行，靠二次 Read 才补回——已记 cerebrum Do-Not-Repeat。
+
+---
+
 ## 这个项目怎么教 vibe coding
 
 ### 人的工作

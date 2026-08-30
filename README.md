@@ -37,6 +37,10 @@ curriculum.
 - **Measured, not asserted** — `examples/measure_efficiency.py` reports real numbers
   (rounds, compaction ratio, replay latency, sandbox overhead) in
   `doc/02_goal_loop/efficiency.md`.
+- **Deterministically tested** — red-green TDD under a `fail_under=92` coverage gate;
+  `faux_provider` replaces only "what the LLM says" so the loop runs for real; and
+  `world_verifier` machine re-reads produced artifacts instead of trusting a
+  maker/checker self-report.
 
 ## Modules
 
@@ -52,6 +56,8 @@ curriculum.
 | `observability/` | Append-only trace log + byte-level replay | Study guide layer ⑥ |
 | `safety/` | RBAC roles, high-risk HITL, prompt-injection marker | Study guide M6 |
 | `cost_control/` | Token-bucket rate limiter + tool-result cache | Study guide M5.7 |
+| `faux_provider/` | Deterministic scripted LLM (`FauxProvider` + `FauxMaker`): replaces only "what the LLM says" | Target 2 |
+| `goal_loop/world_verifier.py` | `WorldVerifier`: machine re-reads produced artifacts, does not trust maker/checker self-report | Target 3 |
 
 `goal_loop` also ships `registered_roles.py`, which routes the maker/checker through a
 `ToolRegistry` permission gate — so the last "parallel toys" gap (loop → tool registry)
@@ -94,8 +100,13 @@ goal_loop/                   # maker/checker verification loop (verification lay
   loop_runner.py             # loop driver
   models.py                  # GoalSpec, AcceptanceCriterion, LoopState
   roles.py                   # Maker / Checker protocols (generator/evaluator split)
+  registered_roles.py        # maker/checker routed through a ToolRegistry permission gate
   verifier.py                # CommandVerifier (argv-based, shell=False)
+  world_verifier.py          # WorldVerifier: re-read artifacts, distrust self-report (Target 3)
   templates/                 # goal.md, loop-state.md, maker/checker prompts
+faux_provider/               # deterministic scripted LLM boundary (Target 2)
+  provider.py                # FauxProvider: FIFO queue + factory + events + stream
+  maker.py                   # FauxMaker: turns a scripted reply into a MakerOutput
 context_compaction/          # context management layer (80% cutoff compaction)
   compactor.py               # keep marked, archive + summarize the rest
   summarizer.py              # pluggable ExtractiveSummarizer (swap in an LLM)
@@ -144,11 +155,14 @@ uv pip install -e ".[dev]"
 ## Run tests
 
 ```bash
-python -m pytest tests/test_harness.py -q
+python3 -m pytest -q                 # full suite
+scripts/check.sh                     # coverage gate: fail_under=92 + term-missing
 ```
 
-79 tests total: persistence 20, `goal_loop` 27, `context_compaction` 9, `hippocampus`
-6, `harness_layers` 16, and `efficiency` 2.
+126 tests total across 11 modules. The coverage gate (`fail_under=92`, see
+`[tool.coverage]` in `pyproject.toml`) enforces that uncovered lines are either dead
+code (delete them) or missing behavior (add a test) — never pad tests to hit the
+number. Current total coverage: 93.11%.
 
 ## Goal loop usage
 
