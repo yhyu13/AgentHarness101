@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "bugs": [
+    {
+      "id": "bug-001",
+      "timestamp": "2026-08-29T04:50:00Z",
+      "error_message": "RuntimeError: maker crashed (red-team attack 1: crashed maker)",
+      "file": "goal_loop/loop_runner.py",
+      "root_cause": "GoalLoopRunner.run() called self._maker() without catching exceptions, so a crashing maker propagated and killed the loop (goal stuck active, neither blocked nor complete).",
+      "fix": "Wrap maker call in try/except; on exception return MakerOutput(ok=False) so the round counts as no-progress and the three-strike audit blocks the goal.",
+      "tags": ["fail-closed", "maker", "exception", "loop"],
+      "related_bugs": ["bug-002"],
+      "occurrences": 1,
+      "last_seen": "2026-08-29T04:50:00Z"
+    },
+    {
+      "id": "bug-002",
+      "timestamp": "2026-08-29T04:50:00Z",
+      "error_message": "RuntimeError: checker crashed (red-team attack 2: crashed checker)",
+      "file": "goal_loop/loop_runner.py",
+      "root_cause": "GoalLoopRunner.run() called self._checker() without catching exceptions, so a crashing checker propagated and killed the loop.",
+      "fix": "Wrap checker call in try/except; on exception return CheckerOutput(verdict=FAIL) so the round fails verification and blocks instead of crashing.",
+      "tags": ["fail-closed", "checker", "exception", "loop"],
+      "related_bugs": ["bug-001"],
+      "occurrences": 1,
+      "last_seen": "2026-08-29T04:50:00Z"
+    },
+    {
+      "id": "bug-003",
+      "timestamp": "2026-08-29T04:50:00Z",
+      "error_message": "check_prompt missed 'Ignore ALL Previous Instructions' (red-team attack 3: injection variant)",
+      "file": "safety/safety.py",
+      "root_cause": "SafetyGuard.check_prompt matched a fixed list of exact lowercase substrings; 'all previous instructions' was not in the list, so the variant slipped past.",
+      "fix": "Add 'ignore all previous instructions' marker and normalize whitespace via re.sub(r'\\s+',' ',content.lower()) so spacing/extra 'all' variants still match.",
+      "tags": ["prompt-injection", "safety", "bypass"],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-08-29T04:50:00Z"
+    },
+    {
+      "id": "bug-004",
+      "timestamp": "2026-08-29T04:50:00Z",
+      "error_message": "deploy approved with risk='low' bypassed HITL (red-team attack 4: risk downgrade)",
+      "file": "safety/safety.py",
+      "root_cause": "SafetyGuard.request trusted the caller's risk label; an admin could label the intrinsically high-risk 'deploy' as low and skip human approval.",
+      "fix": "Add a module-level _HIGH_RISK_ACTIONS frozenset (deploy/delete/drop/purge/format/rm/rmdir); request() now requires human approval when action is in that set regardless of the risk label.",
+      "tags": ["safety", "HITL", "RBAC", "risk-downgrade"],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-08-29T04:50:00Z"
+    },
+    {
+      "id": "bug-005",
+      "timestamp": "2026-08-30T14:32:18Z",
+      "error_message": "coverage gap: faux_provider/provider.py:121-124 (stream() tokens_per_second branch) never exercised",
+      "file": "tests/test_faux_provider.py",
+      "root_cause": "The tokens_per_second streaming branch was unreached by tests: its time.sleep made a timing assertion seem flaky, so only the default single-chunk path had a test. Not a runtime defect — a code-health gap.",
+      "fix": "Judged it behavior (not dead code): documented in plan.md + docstring and reachable via the tokens_per_second param. Added test_stream_with_rate_limit_yields_word_chunks, monkeypatching time.sleep to a no-op so the chunk-split assertion is deterministic. provider.py now 100% covered.",
+      "tags": ["coverage", "dead-code", "faux_provider", "stream", "monkeypatch"],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-08-30T14:32:18Z"
+    }
+  ]
+}

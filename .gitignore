@@ -22,3 +22,17 @@ goal_loop_demo_artifact.txt
 *.jsonl
 compaction_archive/
 hippocampus_memory/
+
+# OpenWolf: sync only the durable memory files across devices.
+# Runtime state (token-ledger, daemon.log, backups, hippocampus buffer, scan
+# indexes) is machine-local and regenerated; dashboard-token must never leak.
+.wolf/*
+!.wolf/cerebrum.md
+!.wolf/STATUS.md
+!.wolf/buglog.json
+!.wolf/memory.md
+!.wolf/identity.md
+!.wolf/config.json
+!.wolf/cron-manifest.json
+!.wolf/OPENWOLF.md
+!.wolf/reframe-frameworks.md
