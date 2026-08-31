@@ -20,6 +20,7 @@ from goal_loop.models import (
 from goal_loop.roles import Checker, Maker
 from goal_loop.verifier import CommandVerifier
 from goal_loop.world_verifier import WorldVerifier
+from goal_loop.self_improver import SelfImprover
 from goal_persistence import GoalRuntime, GoalStatus
 from sandbox import Sandbox
 from observability import TraceLog
@@ -50,6 +51,7 @@ class GoalLoopRunner:
         trace_log: TraceLog | None = None,
         hippocampus: Hippocampus | None = None,
         world_verifier: WorldVerifier | None = None,
+        self_improver: SelfImprover | None = None,
     ) -> None:
         self._spec = spec
         self._runtime = runtime
@@ -60,6 +62,7 @@ class GoalLoopRunner:
         self._trace_log = trace_log
         self._hippocampus = hippocampus
         self._world_verifier = world_verifier
+        self._self_improver = self_improver
         self._state_dir = Path(state_dir) if state_dir else Path(".")
         self._state = LoopState(loop_name=spec.objective)
         self._thread_id: Optional[str] = None
@@ -195,9 +198,14 @@ class GoalLoopRunner:
                 )
                 break
 
+            steering = cont.steering_prompt
+            if self._self_improver is not None:
+                extra = self._self_improver.steering_context(self._spec.objective)
+                if extra:
+                    steering = steering + "\n\n" + extra
             try:
                 maker_output: MakerOutput = self._maker(
-                    self._spec, self._state, cont.steering_prompt
+                    self._spec, self._state, steering
                 )
             except Exception as exc:  # fail closed: a crashed maker is no-progress, never a crash
                 maker_output = MakerOutput(
@@ -368,4 +376,12 @@ class GoalLoopRunner:
             finished_at=_now(),
             summary=summary,
         )
+        if self._self_improver is not None and self._thread_id is not None:
+            self._self_improver.distill(
+                thread_id=self._thread_id,
+                objective=self._spec.objective,
+                status=status,
+                summary=summary,
+                issues=list(self._state.blockers),
+            )
         self._persist_state()

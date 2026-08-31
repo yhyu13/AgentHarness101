@@ -72,3 +72,7 @@ class Hippocampus:
     def retrospective(self) -> list[MemoryFact]:
         """Return the current set of correct facts for periodic review."""
         return self._store.correct_facts()
+
+    def facts(self) -> list[MemoryFact]:
+        """Return every learned fact (correct and incorrect) for self-review / retrieval."""
+        return self._store.list_facts()

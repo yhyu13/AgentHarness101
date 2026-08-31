@@ -32,6 +32,9 @@ curriculum.
   and summarized when the window crosses 80%.
 - **Hippocampus long-term memory** — task trajectory → important-content index → local
   cache → learn/unlearn/correct → replay/retrospect.
+- **Self-improving loop** — a finished run distills into a durable lesson
+  (`repeat`/`avoid`); the next run re-injects relevant lessons into steering, so the
+  harness improves across runs instead of repeating past failures.
 - **Safety and cost cross-cuts** — RBAC + high-risk HITL + injection marker
   (`safety/`); token-bucket rate limiter + tool-result cache (`cost_control/`).
 - **Measured, not asserted** — `examples/measure_efficiency.py` reports real numbers
@@ -58,6 +61,7 @@ curriculum.
 | `cost_control/` | Token-bucket rate limiter + tool-result cache | Study guide M5.7 |
 | `faux_provider/` | Deterministic scripted LLM (`FauxProvider` + `FauxMaker`): replaces only "what the LLM says" | Target 2 |
 | `goal_loop/world_verifier.py` | `WorldVerifier`: machine re-reads produced artifacts, does not trust maker/checker self-report | Target 3 |
+| `goal_loop/self_improver.py` | `SelfImprover`: distills a run's outcome into a durable lesson and re-injects relevant lessons on the next run | Target 7 |
 
 `goal_loop` also ships `registered_roles.py`, which routes the maker/checker through a
 `ToolRegistry` permission gate — so the last "parallel toys" gap (loop → tool registry)
@@ -103,6 +107,7 @@ goal_loop/                   # maker/checker verification loop (verification lay
   registered_roles.py        # maker/checker routed through a ToolRegistry permission gate
   verifier.py                # CommandVerifier (argv-based, shell=False)
   world_verifier.py          # WorldVerifier: re-read artifacts, distrust self-report (Target 3)
+  self_improver.py           # SelfImprover: distill outcome -> lesson, re-inject next run (Target 7)
   templates/                 # goal.md, loop-state.md, maker/checker prompts
 faux_provider/               # deterministic scripted LLM boundary (Target 2)
   provider.py                # FauxProvider: FIFO queue + factory + events + stream
@@ -159,10 +164,10 @@ python3 -m pytest -q                 # full suite
 scripts/check.sh                     # coverage gate: fail_under=92 + term-missing
 ```
 
-126 tests total across 11 modules. The coverage gate (`fail_under=92`, see
+139 tests total across 11 modules. The coverage gate (`fail_under=92`, see
 `[tool.coverage]` in `pyproject.toml`) enforces that uncovered lines are either dead
 code (delete them) or missing behavior (add a test) — never pad tests to hit the
-number. Current total coverage: 93.11%.
+number. Current total coverage: 93.33%.
 
 ## Goal loop usage
 

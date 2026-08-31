@@ -251,6 +251,16 @@
 
 ---
 
+### Era 30 — harness skills 调研 → 自我改进闭环
+
+| ME | YOU |
+|---|---|
+| 给了 `AGENTS_REPO.md`（100+ 个 harness/skill 仓库，六个主题），让「用 harness skills 改进本仓库，自动做不提问」。 | 把调研蒸馏成 `doc/reference_harness/harness_skills.md`：六个主题重排成「五个台阶」，三条横切规律（只 mock LLM 边界 / 越跑越好=记忆闭环 / 无人值守=调度+晨报），落地成三个新目标。先做目标 1（自我改进闭环）：新增 `goal_loop/self_improver.py`（`SelfImprover`：结果→教训 `repeat`/`avoid`→下次注入 steering），给 `Hippocampus` 加 `facts()`，`GoalLoopRunner` 加可选 `self_improver` 参数 fail-open。13 新测试 red→green，全量 126 → 139 passed，覆盖率 93.11% → 93.33%，`self_improver.py` 100%。 |
+
+关键决策：教训用 `correct=False` 承载「别再这么做」，不发明新字段；检索用确定性词重叠（`len>=3` 交集），不发 LLM；放 `goal_loop/` 内避免 `hippocampus→goal_loop` 环。
+
+---
+
 ## 这个项目怎么教 vibe coding
 
 ### 人的工作
