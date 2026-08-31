@@ -118,3 +118,8 @@
 | 10:51 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
 | 11:08 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
 | 11:18 | Edited .gitignore | — | ~120 |
+| 11:19 | Session end: 4 writes across 2 files (CLAUDE.md, .gitignore) | 5 reads | ~4666 tok |
+| 11:38 | Edited pyproject.toml | reduced (-12 lines) | ~29 |
+| 11:38 | Edited tests/test_coverage_gate.py | modified test_coverage_run_has_source_branch_omit() | ~187 |
+| 11:40 | Edited tests/test_goal_loop.py | "goal_loop" → "src" | ~28 |
+| 11:41 | Session end: 7 writes across 5 files (CLAUDE.md, .gitignore, pyproject.toml, test_coverage_gate.py, test_goal_loop.py) | 8 reads | ~12185 tok |

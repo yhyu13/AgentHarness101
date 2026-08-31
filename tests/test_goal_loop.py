@@ -124,7 +124,7 @@ Ship.
     def test_parses_bundled_template(self) -> None:
         from pathlib import Path
 
-        template = Path(__file__).parent.parent / "goal_loop" / "templates" / "goal.md"
+        template = Path(__file__).parent.parent / "src" / "goal_loop" / "templates" / "goal.md"
         spec = GoalSpec.from_markdown(template)
         assert spec.objective.startswith("Implement the XX feature")
         assert len(spec.acceptance_criteria) == 3

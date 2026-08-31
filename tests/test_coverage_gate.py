@@ -39,12 +39,19 @@ def test_dev_deps_include_pytest_cov() -> None:
 
 def test_coverage_run_has_source_branch_omit() -> None:
     run = _config()["tool"]["coverage"]["run"]
-    # Source must cover at least these packages; extra packages are allowed.
-    assert set(SOURCE_PACKAGES) <= set(run["source"])
+    # src-layout: measure everything under src/.
+    assert "src" in run["source"]
     assert run["branch"] is True
     omit = run["omit"]
     assert any("tests" in entry for entry in omit)
     assert any("examples" in entry for entry in omit)
+
+
+def test_all_source_packages_live_under_src() -> None:
+    # Every harness package must sit under src/ (the coverage source root),
+    # so a newly added package can't silently fall outside the gate.
+    for pkg in SOURCE_PACKAGES:
+        assert (ROOT / "src" / pkg).is_dir(), f"{pkg} missing under src/"
 
 
 def test_coverage_report_has_fail_under_and_show_missing() -> None:
