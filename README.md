@@ -55,7 +55,7 @@ curriculum.
 | `hippocampus/` | Task trajectory, important-content index, local cache, learn/unlearn, replay | Study guide layer ④ |
 | `tool_registry/` | Register tools, permission labels, least privilege, schema validation | Study guide layer ② |
 | `sandbox/` | Fail-closed allowlist executor (not an OS-level jail) | Study guide layer ③ |
-| `eval_harness/` | Eval set + deterministic ExactJudge (swap in an LLM-judge) | Study guide layer ⑤ |
+| `eval_harness/` | Eval set + deterministic ExactJudge + fail-closed LLMJudge (timeout/error/garbage → FAIL) | Study guide layer ⑤ |
 | `observability/` | Append-only trace log + byte-level replay | Study guide layer ⑥ |
 | `safety/` | RBAC roles, high-risk HITL, prompt-injection marker | Study guide M6 |
 | `cost_control/` | Token-bucket rate limiter + tool-result cache | Study guide M5.7 |
@@ -96,6 +96,7 @@ Active → { Paused, Blocked, UsageLimited, BudgetLimited, Complete }
 ## Project layout
 
 ```text
+src/                         # all 11 harness packages (src layout)
 goal_persistence/            # durable goal state machine (state layer)
   __init__.py                # public API
   models.py                  # Goal, GoalStatus, Usage, transition rules
@@ -166,10 +167,10 @@ python3 -m pytest -q                 # full suite
 scripts/check.sh                     # gate: format + lint + test + coverage
 ```
 
-170 tests total across 11 modules. The coverage gate (`fail_under=92`, see
+206 tests total across 11 modules. The coverage gate (`fail_under=92`, see
 `[tool.coverage]` in `pyproject.toml`) enforces that uncovered lines are either dead
 code (delete them) or missing behavior (add a test) — never pad tests to hit the
-number. Current total coverage: 93.71%.
+number. Current total coverage: 97.18%.
 
 ## Goal loop usage
 
@@ -258,10 +259,14 @@ runtime.mark_complete("thread-1", "sandbox tests pass")
 Configuration (`.env`):
 
 ```ini
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-ANTHROPIC_MODEL=MiniMax-M3
+ANTHROPIC_BASE_URL=https://llm-proxy.tapsvc.com
+ANTHROPIC_MODEL=deepseek/deepseek-v4-pro
 ANTHROPIC_AUTH_TOKEN=...
 ```
+
+The current verified real-LLM baseline uses `deepseek/deepseek-v4-pro` (see
+`doc/04_faux_provider/benchmark.md`). The "Result" table below was captured on the
+earlier MiniMax endpoint and is kept as a historical run.
 
 Result:
 
