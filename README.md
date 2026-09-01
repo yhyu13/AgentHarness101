@@ -178,13 +178,15 @@ coverage: 97.18%.
 `eval_llm/` + `tests/test_real_llm.py` exercise every harness LLM boundary against 5
 real models (deepseek-v4-pro/flash, grok-4.6, minimax-m3, kimi-k2-turbo-preview) across
 four dimensions — breadth, single-loop terminal states, real latency/token variance,
-and red-team — 56 tests, all green. The lessons are worth more than the pass rate:
+and red-team — 56 tests, all green. Context for each test — why, what, expected, actual, and how the unexpected was handled:
 
-- **Two API formats.** deepseek/grok/minimax are Anthropic-compatible (`/v1/messages`); kimi is OpenAI-compatible (`/chat/completions`). An Anthropic client against kimi 404s — check the format before plugging a new model in.
-- **Thinking models burn `max_tokens`.** kimi's `reasoning_content` and deepseek's `ThinkingBlock` spend the budget on reasoning first; at `max_tokens≤128` kimi's judge/summarizer return empty content and false-fail. Extract text via `b.type == "text"`, and give thinking models ≥512 tokens.
-- **Don't subtract cache from token accounting.** llm-proxy reports `input_tokens` and `cache_read_input_tokens` as disjoint buckets; `input - cache + output` goes negative (-97). Use `input + output`.
-- **Latency variance spans an order of magnitude.** grok-4.6 averages 15.2s with std 17.0s; deepseek-v4-flash averages 3.1s. Set timeouts on the distribution, not the mean.
-- **Red-team holds on every model.** Injection, self-report, and high-risk actions never reach `complete` — the machine checks are model-independent.
+| Test (what) | Why | Expected | Actual | Handling |
+|---|---|---|---|---|
+| Model probe | 5 models must all run for real; settle format first | all Anthropic-compatible | 4 are; kimi is OpenAI; glm no quota (code 1113) | kimi → OpenAI client = **fixed**; glm dropped = **accepted** |
+| Thinking-model boundary (judge/summarizer) | every LLM boundary on a real model | verdict / non-empty summary | 4 models fine; kimi empty `content` (reasoning eats `max_tokens`) | filter `b.type=="text"` + `max_tokens`→512 = **fixed** |
+| Token accounting | numbers must be real | `input - cache + output` | llm-proxy reports disjoint buckets; subtract → -97 | use `input + output` = **fixed** |
+| Latency metrics | real latency for SLO | a few seconds each | mostly 3–6s; grok-4.6 mean 15.2s / std 17.0s | **accepted** (model trait); timeouts on distribution |
+| Red-team | adversarial model vs deterministic guards | never reach complete | injection/self-report/high-risk all blocked = as expected | **accepted**, no bug |
 
 It burns real API, so it's opt-in and skipped by default:
 

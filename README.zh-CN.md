@@ -79,13 +79,15 @@ scripts/check.sh                     # 四闸：format + lint + test + coverage
 
 ## 真 LLM 深度评测（opt-in）
 
-`eval_llm/` + `tests/test_real_llm.py` 用真模型跑四维（广度 / 单 loop 终态 / 真实计量 / 红队）× 5 模型（deepseek-v4-pro/flash、grok-4.6、minimax-m3、kimi-k2-turbo-preview，glm 无额度排除），56 条全绿。跑出来的教训比「都过了」值钱：
+`eval_llm/` + `tests/test_real_llm.py` 用真模型跑四维（广度 / 单 loop 终态 / 真实计量 / 红队）× 5 模型（deepseek-v4-pro/flash、grok-4.6、minimax-m3、kimi-k2-turbo-preview，glm 无额度排除），56 条全绿。每个测试的上下文（为什么、干什么、预期、实测、超出预期怎么处理）如下：
 
-- **接模型先分 API 格式。** 分两派：deepseek/grok/minimax 走 Anthropic 兼容（`/v1/messages`），kimi 走 OpenAI 兼容（`/chat/completions`）。用 Anthropic 客户端调 kimi 直接 404，别硬套。
-- **thinking 模型会吃 `max_tokens`。** kimi 的 `reasoning_content`、deepseek 的 `ThinkingBlock` 先把预算花在推理上，`max_tokens≤128` 时 kimi 的 judge/summarizer 返回空内容、被误判 FAIL，提到 512 才转绿。提取正文要过滤 `b.type == "text"`，不能假设 `content[0]` 是正文。
-- **token 记账别减缓存。** llm-proxy 把 `input_tokens` 和 `cache_read_input_tokens` 报成互不重叠的两桶，`input - cache + output` 算出负值（实测 -97），用 `input + output`。
-- **延迟方差跨模型差一个量级。** grok-4.6 平均 15.2s、std 17.0s（慢且抖），deepseek-v4-flash 平均 3.1s。设超时得看分布，不是只看均值。
-- **红队全模型守住。** 注入 / 自报 / 高风险动作，5 个模型都到不了 complete——机器校验和确定性守卫跨模型成立。
+| 测试（干什么） | 为什么 | 预期 | 实测 | 超出预期怎么处理 |
+|---|---|---|---|---|
+| 模型探测 | 5 个模型都得真跑，先定格式 | 都 Anthropic 兼容 | 4 个是；kimi 走 OpenAI；glm 无额度（code 1113） | kimi 换 OpenAI 客户端=**修复**；glm 排除=**接受** |
+| thinking 模型边界（judge/summarizer） | 每个 LLM 边界接真模型 | 返回判定 / 非空摘要 | 4 模型正常；kimi 空 `content`（reasoning 吃掉 `max_tokens`） | 提取过滤 `b.type=="text"` + `max_tokens`→512=**修复** |
+| token 记账 | 计量要真实 | `input - cache + output` | llm-proxy 两字段互不重叠，相减 -97 | 改 `input + output`=**修复** |
+| 数字 latency | 真实延迟给 SLO | 各模型几秒 | 多数 3–6s；grok-4.6 平均 15.2s / std 17.0s | **接受**（模型特性）；结论=设超时看分布 |
+| 红队 | 真对抗模型打确定性守卫 | 都到不了 complete | 注入/自报/高风险 5 模型全 blocked=符合预期 | **接受**，无 bug |
 
 套件默认 skip，`RUN_REAL_LLM=1` 显式跑；单模型挂掉 graceful skip 不拖垮整批。真数字（每模型 latency mean±std、各终态 token/墙钟）见 `doc/10_real_llm_eval/report.md`。
 
