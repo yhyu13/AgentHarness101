@@ -153,6 +153,22 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-01T01:34:33.072Z"
+    },
+    {
+      "id": "bug-010",
+      "timestamp": "2026-09-01T04:07:43.971Z",
+      "error_message": "Wrong return value",
+      "file": "tests/test_real_llm.py",
+      "root_cause": "Was returning: generate(self._s, f\"Summarize into one short sente",
+      "fix": "Now returns: generate(self._s, f\"Summarize into one short sente",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T04:07:43.971Z"
     }
   ]
 }

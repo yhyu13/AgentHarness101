@@ -208,3 +208,27 @@
 | 10:51 | Edited README.zh-CN.md | inline fix | ~15 |
 | 10:51 | Edited README.md | inline fix | ~17 |
 | 10:51 | Edited README.md | inline fix | ~19 |
+| 10:52 | Session end: 64 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~82079 tok |
+| 11:32 | Session end: 64 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~82079 tok |
+| 11:43 | Created doc/10_real_llm_eval/design.md | — | ~1020 |
+| 11:44 | Created doc/10_real_llm_eval/plan.md | — | ~505 |
+| 11:45 | Edited pyproject.toml | 3→5 lines | ~59 |
+| 11:46 | Created tests/test_real_llm_adapter.py | — | ~998 |
+| 11:46 | Created eval_llm/__init__.py | — | ~82 |
+| 11:47 | Created eval_llm/client.py | — | ~1457 |
+| 11:47 | Created tests/test_real_llm_report.py | — | ~362 |
+| 11:48 | Created eval_llm/report.py | — | ~543 |
+| 11:54 | Created tests/test_real_llm.py | — | ~3380 |
+| 11:54 | Edited pyproject.toml | 5→8 lines | ~82 |
+| 11:56 | Edited tests/test_real_llm_adapter.py | modified test_load_env_parses_dotenv_and_prefers_process_env() | ~192 |
+| 12:07 | Edited tests/test_real_llm.py | modified test_breadth_llmjudge_fail_closed() | ~172 |
+| 12:07 | Edited tests/test_real_llm.py | modified summarize() | ~82 |
+| 12:09 | Edited eval_llm/report.py | 4→4 lines | ~43 |
+| 12:09 | Edited eval_llm/report.py | 4→4 lines | ~60 |
+| 12:09 | Edited tests/test_real_llm_report.py | 6→7 lines | ~79 |
+| 12:13 | Edited JOURNEY.md | expanded (+8 lines) | ~270 |
+| 12:16 | Edited README.md | expanded (+15 lines) | ~249 |
+| 12:17 | Edited README.zh-CN.md | inline fix | ~20 |
+| 12:18 | Edited README.zh-CN.md | 2→2 lines | ~52 |
+| 12:18 | Edited README.zh-CN.md | expanded (+11 lines) | ~167 |
+| 12:18 | Edited README.zh-CN.md | inline fix | ~15 |

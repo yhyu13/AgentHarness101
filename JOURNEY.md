@@ -300,6 +300,14 @@
 
 关键决策：真 LLM 基线不再「待确认」——三处修复里最要紧的是 (a) thinking 模型要过滤 `TextBlock`，不能假设 `content[0]` 是文本。覆盖率收口顺带挖出一条技术债：`goal_persistence/accounting.py:47` 的 `tokens = input - cached + output` 与 example 里同一个缓存记账假设——标准 Anthropic 语义下正确（`cached` 是 `input` 子集），但 llm-proxy 把两字段报成互不重叠的桶，接真 adapter 时会算错；要修得先给 adapter 层定 token 记账契约，不是补覆盖率能解决的。
 
+### Era 35 — 真 LLM 深度评测套件（跨 5 模型 × 四维）
+
+| ME | YOU |
+|---|---|
+| 「真 LLM 基线 为什么数据这么浅？需要测试很深，设计」→ 选了广度（全层真 LLM）+ 深度（单 loop 边界）+ 数字（真实计量）+ 红队（真模型），跨 6 模型，要「可复用评测套件 + 报告」。之后「updated .env with kimi and glm ... now go」。 | 先探测 6 模型：deepseek-v4-pro/flash、grok-4.6、minimax-m3 走 Anthropic 格式；kimi 走 **OpenAI** 格式（用 anthropic 客户端全 404 才试出来）；glm code 1113 = 账户无额度，不是配置错。写 `doc/10_real_llm_eval/design.md`+`plan.md`，TDD 落地 `eval_llm/`（`client.py` 双格式适配 + `report.py` 报告收集）+ `tests/test_real_llm.py`（四维 × 5 模型，`RUN_REAL_LLM=1` opt-in，不可用模型 graceful skip 记原因）。 |
+
+关键决策：真模型套件做成「默认 skip、显式 opt-in、某模型挂掉不拖垮整批」，56 条全绿（5 模型 × 四维 + 探测 + 报告写盘）。跑出一个浅基线没暴露的真问题：**thinking 模型（kimi）的 `reasoning_content` 消耗 `max_tokens` 预算**，小 `max_tokens`（≤128）会返回空 `content`——kimi 的 llmjudge/summarizer 两条 breadth 先红后绿（`max_tokens` 提到 512）。成本指标标「待确认」：`PRICING` 是 mini/small/large 分层、无真实模型 ID，套件另建 `model -> Price` 表并显式注释 vendor 数字待确认。真数字见 `doc/10_real_llm_eval/report.md`（含每模型 metrics 的 latency mean±std、depth 各终态 token/墙钟）。
+
 ---
 
 ## 这个项目怎么教 vibe coding

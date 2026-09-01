@@ -15,7 +15,12 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# eval_llm/ is the real-LLM eval tooling at repo root (not under src/, not in coverage
+# source); add "." so `import eval_llm` resolves from tests.
+pythonpath = ["src", "."]
+markers = [
+    "real_llm: opt-in tests that burn real LLM API (RUN_REAL_LLM=1)",
+]
 
 [tool.coverage.run]
 source = ["src"]

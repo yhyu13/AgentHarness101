@@ -19,6 +19,7 @@
 - **harness skills 调研 → 自我改进闭环（目标 7）**：`doc/reference_harness/harness_skills.md` 把 `AGENTS_REPO.md` 的 100+ 仓库蒸馏成「五台阶 + 三条横切规律 + 三个新目标」；实现目标 1（§5 自我改进）`goal_loop/self_improver.py`（`SelfImprover`：run 结果→`repeat`/`avoid` 教训→下次注入 steering）+ `Hippocampus.facts()` + `GoalLoopRunner` 可选 `self_improver` 参数 fail-open。13 新测试，全量 **126→139 passed**、覆盖率 **93.33%**，`self_improver.py` 100%。
 - **src 布局迁移 + 100 任务路线图 + 目标 2/3（无人值守调度 + 多代理编排）**：`doc/roadmap/100_tasks.md`（100 条 P0/P1/P2 + 自我评审）；`goal_loop/scheduler.py`（`Scheduler`：`resume_all`→串行 `run_until_terminal`→晨报，skip/errored 隔离 + `run_periodic` 注入 sleep）+ `goal_loop/orchestrator.py`（`Orchestrator`：planner→executor×N→reviewer，`make`/`check` 接 loop）。全量 **140→154 passed**、覆盖率 **93.79%**，两新模块均 100%。crashed-maker 兜底核实为早已 fail-closed（`loop_runner.py:210-219`），无需新代码。
 - **P1 加固（Era 33）**：`eval_harness/judge.py`（`LLMJudge` fail-closed，超时/异常/垃圾回复判 FAIL）；`cost_control/cost.py`（`Price`/`PRICING`/`estimate_cost` 按模型计价，未知模型 KeyError）+ `cost_control/ledger.py`（`TokenLedger` 持久化 input/output/calls）；`observability/trace.py`（`span` 记 `duration_ms`）；对抗补 `resume_all` 幂等 + 多 goal 状态隔离；`sandbox/path_policy.py`（`PathPolicy` 文件写白名单，`..` 穿越 fail-closed，seccomp/network 属 OS-gated）；CI `check.sh` 扩 fmt+lint+test+coverage 四闸 + `pyproject.toml` 加 ruff（line-length 100、E4/E7/E9/F）清空 34 条 lint；`doc/08_scheduler`/`doc/09_orchestrator` plan+journey 补齐；覆盖率补到 **97.18%**（目标 95%）。全量 **154→206 passed**。
+- **真 LLM 深度评测套件（Era 35）**：`eval_llm/`（`client.py` 双格式适配 Anthropic/OpenAI + `report.py` 报告收集）+ `tests/test_real_llm.py`（四维 × 5 模型，`RUN_REAL_LLM=1` opt-in，单模型挂掉 graceful skip 不拖垮整批）。5 可用模型：deepseek-v4-pro/flash、grok-4.6、minimax-m3（Anthropic 格式）+ kimi-k2-turbo-preview（OpenAI 格式）；glm code 1113 无额度排除。56 条全绿（5×四维 + 探测 + 报告写盘）。抓出浅基线没暴露的真问题：thinking 模型（kimi）`reasoning_content` 消耗 `max_tokens`，小 cap 返回空 `content` → llmjudge/summarizer 提到 512。真数字见 `doc/10_real_llm_eval/report.md`（含每模型 metrics latency mean±std）。成本指标标待确认（PRICING 无真实模型 ID）。离线新增 11 测试，全量 **206→217 passed**（另 56 opt-in skipped）。
 
 ---
 
@@ -53,7 +54,8 @@ P1 已落定（Era 33）：LLM-judge、按模型计价、token 账本、trace sp
 ## 🔧 Useful commands
 
 ```bash
-python3 -m pytest -q                                # 全量测试（206 passed）
+python3 -m pytest -q                                # 全量测试（217 passed，另 56 opt-in skipped）
+RUN_REAL_LLM=1 python3 -m pytest tests/test_real_llm.py -q  # 真 LLM 四维评测（烧真实 API，写 report.md）
 python3 -m pytest --cov --cov-report=term-missing -q  # 覆盖率闸门（fail_under=92）
 python3 -m pytest tests/test_faux_provider.py -q    # 单目标测试
 python3 examples/system_e2e_trace.py                # 全系统 E2E 每轮对话 trace（happy + 对抗）

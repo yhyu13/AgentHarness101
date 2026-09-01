@@ -69,12 +69,12 @@ uv pip install -e ".[dev]"
 ## 运行测试
 
 ```bash
-python3 -m pytest -q                 # 全量测试（206 passed）
+python3 -m pytest -q                 # 全量测试（217 passed，另 56 opt-in 真 LLM）
 scripts/check.sh                     # 四闸：format + lint + test + coverage
 ```
 
-当前 **206 个测试全绿，覆盖率 97.18%**（`fail_under=92` 闸门，见 `pyproject.toml` 的
-`[tool.coverage]`）。覆盖 happy path、fail-closed、红队对抗、全系统 E2E 四类场景。
+当前 **217 个测试全绿，覆盖率 97.18%**（`fail_under=92` 闸门，见 `pyproject.toml` 的
+`[tool.coverage]`）。覆盖 happy path、fail-closed、红队对抗、全系统 E2E 四类场景；另有 56 条 opt-in 真 LLM 四维评测（`RUN_REAL_LLM=1` 时跑，见下文「真 LLM 深度评测」）。
 未覆盖的 ~2.82% 是防御性校验 / 跳过分支 / 恢复终态 goal 的 resume 分支，不是死代码。
 
 ## 真 LLM 基线
@@ -89,6 +89,17 @@ scripts/check.sh                     # 四闸：format + lint + test + coverage
 | 墙钟 | 5.19–7.50s / 平均 6.21s |
 
 真数字与「只 mock LLM 边界、其余跑真货」的分工见 `doc/04_faux_provider/benchmark.md`。
+
+## 真 LLM 深度评测（opt-in）
+
+上表只测了一条 happy path，够验证「能跑」，不够量化「多稳」。`eval_llm/` + `tests/test_real_llm.py` 把评测扩成 **四维 × 5 模型**：
+
+- **广度**：每个 harness LLM 边界都接真模型（maker / LLMJudge / summarizer）
+- **深度**：单 loop 终态（complete / blocked 三振 / budget_limited / stopped_max_rounds）
+- **数字**：真实 latency mean±std、token、成本
+- **红队**：真对抗模型 vs 确定性守卫（注入 / 自报 / 高风险动作）
+
+5 个可用模型：deepseek-v4-pro/flash、grok-4.6、minimax-m3 走 Anthropic 格式，kimi-k2-turbo-preview 走 OpenAI 格式（glm 无额度排除），56 条全绿。套件默认 skip，显式 `RUN_REAL_LLM=1` 才跑；单模型挂掉 graceful skip 不拖垮整批；真数字见 `doc/10_real_llm_eval/report.md`。
 
 ## goal_loop 用法
 
@@ -164,7 +175,7 @@ src/                         # 11 个 harness 包（src 布局）
   safety/                    # 安全横切面(RBAC + HITL + 注入标记)
   cost_control/              # 成本横切面(限流 + 缓存 + TokenLedger + 按模型计价)
 examples/                    # 可运行 demo
-tests/                       # 测试（206）
+tests/                       # 测试（217 + 56 opt-in 真 LLM）
 scripts/check.sh             # 四闸：format + lint + test + coverage
 doc/
   course/                    # TASK.md + 00-课程大纲.md(课程)

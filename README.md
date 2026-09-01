@@ -167,10 +167,25 @@ python3 -m pytest -q                 # full suite
 scripts/check.sh                     # gate: format + lint + test + coverage
 ```
 
-206 tests total across 11 modules. The coverage gate (`fail_under=92`, see
-`[tool.coverage]` in `pyproject.toml`) enforces that uncovered lines are either dead
-code (delete them) or missing behavior (add a test) — never pad tests to hit the
-number. Current total coverage: 97.18%.
+217 tests total across 11 modules, plus a 56-test opt-in real-LLM suite (see
+`doc/10_real_llm_eval/`). The coverage gate (`fail_under=92`, see `[tool.coverage]`
+in `pyproject.toml`) enforces that uncovered lines are either dead code (delete them)
+or missing behavior (add a test) — never pad tests to hit the number. Current total
+coverage: 97.18%.
+
+### Real-LLM deep eval (opt-in)
+
+`eval_llm/` + `tests/test_real_llm.py` exercise every harness LLM boundary against 5
+real models (deepseek-v4-pro/flash, grok-4.6, minimax-m3, kimi-k2-turbo-preview) across
+four dimensions — breadth, single-loop terminal states, real latency/token variance,
+and red-team. It burns real API, so it's opt-in and skipped by default:
+
+```bash
+RUN_REAL_LLM=1 python3 -m pytest tests/test_real_llm.py -q
+```
+
+Each run writes a per-model report to `doc/10_real_llm_eval/report.md`. A single
+unreachable model skips gracefully rather than failing the batch.
 
 ## Goal loop usage
 

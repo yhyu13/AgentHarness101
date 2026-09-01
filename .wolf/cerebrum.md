@@ -34,6 +34,8 @@
 - [2026-09-01] src 布局迁移后，`examples/*.py` 的 `sys.path.insert(0, parent.parent)` 还指 repo root，不是 `src/`，直接跑会 `ModuleNotFoundError: goal_loop`。迁移布局时要连 examples 的 sys.path 一起改成 `parent.parent / "src"`（已修 9 个示例）。
 - [2026-09-01] 跑真 LLM 基线前先核对 model/base_url/key 三件套是否对齐，别假设示例默认值就是对的：本机 env 的 `ANTHROPIC_MODEL=deepseek/deepseek-v4-pro` 与示例硬编码 `MiniMax-M3` 冲突，用「DeepSeek 模型 + MiniMax key」跑出 maker 0 token、goal BLOCKED。环境里可能配的是另一家 provider。
 - [2026-09-01] thinking 模型（deepseek-v4-pro）的 `response.content` 里 `content[0]` 是 `ThinkingBlock`（只有 `.thinking`），不是 `TextBlock`，直接 `.text` 抛 `AttributeError`。提取文本用 `"".join(b.text for b in content if b.type == "text")`。真 LLM 基线跑通三处要改：① thinking block 提取 ② key 顺序 `ANTHROPIC_AUTH_TOKEN or MINIMAX_API_KEY`（对齐 env 三件套）③ token 记账 `input+output`（llm-proxy 的 `input_tokens` 与 `cache_read_input_tokens` 互不重叠，相减得负值 `-97`）。
+- [2026-09-01] 不同 provider 的 API 格式不一样，别默认都是 Anthropic：deepseek/grok/minimax 走 Anthropic 兼容（`/v1/messages`），kimi 走 OpenAI 兼容（`/chat/completions`，用 anthropic 客户端会 404）；glm 的 429 code 1113 = 账户无额度，不是配置错。接新 provider 先按文档/错误码定格式，别硬套。
+- [2026-09-01] thinking 模型（kimi 的 `reasoning_content`、deepseek 的 `ThinkingBlock`）会把 `max_tokens` 预算先花在推理上，小 cap（≤128）会返回空 `content`/`answer`。接 thinking 模型的 judge/summarizer 要留足 headroom（512 起），否则输出是空串、被误判 FAIL。
 
 ## Decision Log
 
