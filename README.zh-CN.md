@@ -15,11 +15,11 @@
 ## 亮点特性
 
 - **双层目标系统** —— `goal_persistence` 让目标持久化(SQLite 行、空闲自启动、
-  anti-drift 引导、断点续跑、预算自动切换);`goal_loop` 让它*真正跑起来*(解析
+  anti-drift 引导、断点续跑、预算自动切换);`goal_loop` 让它*跑起来*(解析
   `goal.md`、maker/checker 分离、机器验证、停止条件)。
 - **生成器/评估器分离** —— maker 自报"做完了"永远不算完成;只有独立 checker 的
   判定加机器验证过的验收标准才能结束。
-- **真正组合的运行时,不是并排玩具** —— `GoalLoopRunner` 把验证命令交给 fail-closed
+- **组合的运行时** —— `GoalLoopRunner` 把验证命令交给 fail-closed
   的 `sandbox`、把事件写进 append-only 的 `observability` trace、把每一轮记进
   `hippocampus` 长期记忆。
 - **Fail-closed 执行** —— 未配置的沙箱返回 `SANDBOX_UNAVAILABLE` 拒绝执行,绝不裸奔;
@@ -29,7 +29,7 @@
   回放/回溯。
 - **安全与成本横切面** —— `safety/` 提供 RBAC + 高风险人机协同(HITL)+ 注入标记;
   `cost_control/` 提供令牌桶限流 + 工具结果缓存。
-- **用数字说话,不是空口断言** —— `examples/measure_efficiency.py` 产出真实测量值
+- **用数字说话** —— `examples/measure_efficiency.py` 产出真实测量值
   (回合数、压缩比、回放延迟、沙箱开销),记录在 `doc/02_goal_loop/efficiency.md`。
 
 ## 模块

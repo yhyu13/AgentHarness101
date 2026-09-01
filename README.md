@@ -22,7 +22,7 @@ curriculum.
   conditions).
 - **Generator/evaluator separation** — a maker's self-report never completes a goal;
   only an independent checker verdict plus machine-verified acceptance criteria can.
-- **Composed runtime, not parallel toys** — `GoalLoopRunner` routes verification
+- **Composed runtime** — `GoalLoopRunner` routes verification
   through a fail-closed `sandbox`, logs to an append-only `observability` trace, and
   records each round into `hippocampus` long-term memory.
 - **Fail-closed execution** — an unconfigured sandbox refuses with
@@ -37,7 +37,7 @@ curriculum.
   harness improves across runs instead of repeating past failures.
 - **Safety and cost cross-cuts** — RBAC + high-risk HITL + injection marker
   (`safety/`); token-bucket rate limiter + tool-result cache (`cost_control/`).
-- **Measured, not asserted** — `examples/measure_efficiency.py` reports real numbers
+- **Measured** — `examples/measure_efficiency.py` reports real numbers
   (rounds, compaction ratio, replay latency, sandbox overhead) in
   `doc/02_goal_loop/efficiency.md`.
 - **Deterministically tested** — red-green TDD under a `fail_under=92` coverage gate;
