@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,20 @@ CREATE TABLE IF NOT EXISTS thread_goals (
     last_blocked_reason TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS turn_in_flight (
+    thread_id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    rounds INTEGER NOT NULL DEFAULT 0,
+    usage_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
 );
 """
 
@@ -177,3 +192,79 @@ class GoalStore:
                 (GoalStatus.ACTIVE.value,),
             ).fetchall()
         return [_row_to_goal(row) for row in rows]
+
+    # ------------------------------------------------------------------ in-flight marker (C1/C18)
+
+    def mark_in_flight(self, thread_id: str, started_at: datetime) -> None:
+        """Record that a turn was started but not yet flushed."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO turn_in_flight (thread_id, started_at) VALUES (?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET started_at = excluded.started_at
+                """,
+                (thread_id, started_at.isoformat()),
+            )
+            conn.commit()
+
+    def clear_in_flight(self, thread_id: str) -> bool:
+        """Drop the durable in-flight marker; True if a marker was removed."""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM turn_in_flight WHERE thread_id = ?", (thread_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def list_in_flight(self) -> list[str]:
+        """Thread ids with an (possibly stale) durable in-flight turn marker."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT thread_id FROM turn_in_flight").fetchall()
+        return [row["thread_id"] for row in rows]
+
+    def get_in_flight(self, thread_id: str) -> Optional[dict[str, str]]:
+        """The durable in-flight marker for a thread, if present."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT thread_id, started_at FROM turn_in_flight WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------ run history ledger (C3)
+
+    def record_run(
+        self,
+        thread_id: str,
+        status: str,
+        outcome: str,
+        summary: str = "",
+        rounds: int = 0,
+        usage_tokens: int = 0,
+        created_at: datetime | None = None,
+    ) -> None:
+        """Append one outcome row to the durable run ledger."""
+        stamp = (created_at or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_history (
+                    thread_id, status, outcome, summary, rounds, usage_tokens, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (thread_id, status, outcome, summary, rounds, usage_tokens, stamp),
+            )
+            conn.commit()
+
+    def list_runs(self, thread_id: str | None = None, limit: int = 100) -> list[dict[str, object]]:
+        """Most-recent-first run ledger rows, optionally filtered to one thread."""
+        query = (
+            "SELECT thread_id, status, outcome, summary, rounds, usage_tokens, created_at "
+            "FROM run_history"
+        )
+        params: tuple = ()
+        if thread_id is not None:
+            query += " WHERE thread_id = ?"
+            params = (thread_id,)
+        query += " ORDER BY id DESC LIMIT ?"
+        with self._connect() as conn:
+            rows = conn.execute(query, (*params, limit)).fetchall()
+        return [dict(row) for row in rows]

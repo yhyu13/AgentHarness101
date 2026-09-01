@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "goal-persistence"
 version = "0.1.0"
@@ -12,6 +16,15 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=7.0",
 ]
+
+[project.scripts]
+ah = "agent_harness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_harness = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -35,10 +48,16 @@ fail_under = 92
 show_missing = true
 precision = 2
 
+[tool.coverage.coverage_gate]
+# F5: per-package floor so one well-tested package can't mask a weak sibling.
+# The aggregate fail_under=92 above is a lower bound on the whole tree; this table
+# is the per-directory gate scripts/coverage_gate.py enforces in check.sh.
+default_floor = 70
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = [".wolf"]
+extend-exclude = [".wolf", "Python"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

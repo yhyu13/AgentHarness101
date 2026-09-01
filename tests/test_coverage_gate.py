@@ -58,3 +58,21 @@ def test_coverage_report_has_fail_under_and_show_missing() -> None:
     report = _config()["tool"]["coverage"]["report"]
     assert isinstance(report["fail_under"], int)
     assert report["show_missing"] is True
+
+
+def test_per_package_coverage_gate_script_exists() -> None:
+    # F5: the aggregate fail_under alone lets one hot package mask a weak one; the
+    # per-package gate must ship as a runnable script wired into check.sh.
+    assert (ROOT / "scripts" / "coverage_gate.py").is_file()
+
+
+def test_per_package_coverage_floors_declared() -> None:
+    # F5: floors are declared in pyproject (subset assertion — don't pin the exact
+    # package list, so adding a package won't necessarily break the test).
+    gate = _config()["tool"]["coverage"]["coverage_gate"]
+    assert isinstance(gate.get("default_floor"), (int, float))
+    floors = gate.get("floors", {})
+    assert isinstance(floors, dict)
+    for pkg in SOURCE_PACKAGES:
+        if pkg in floors:
+            assert isinstance(floors[pkg], (int, float)), f"floor for {pkg} not numeric"

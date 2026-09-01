@@ -1,5 +1,6 @@
 """Layer-5 verification & eval: eval set + independent judge."""
 
+from eval_harness.gate import RegressionGate, RegressionResult
 from eval_harness.judge import EvalRunner, ExactJudge, Judge, LLMJudge
 from eval_harness.models import EvalCase, EvalReport, EvalResult, Verdict
 
@@ -12,4 +13,6 @@ __all__ = [
     "EvalReport",
     "EvalResult",
     "Verdict",
+    "RegressionGate",
+    "RegressionResult",
 ]

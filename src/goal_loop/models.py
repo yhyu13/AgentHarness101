@@ -223,6 +223,9 @@ class RoundRecord:
     issues: list[Issue] = field(default_factory=list)
     verification: list[VerificationResult] = field(default_factory=list)
     criteria_satisfied: list[str] = field(default_factory=list)
+    # criterion id -> machine-verified pass/fail, so a round that passes c1 but fails c2
+    # is auditable (not flattened into "these ids passed").
+    criterion_results: dict[str, bool] = field(default_factory=dict)
     next_round_plan: str = ""
     human_intervention: bool = False
 
@@ -239,6 +242,7 @@ class RoundRecord:
             issues=[Issue.from_dict(i) for i in data.get("issues", [])],
             verification=[VerificationResult.from_dict(v) for v in data.get("verification", [])],
             criteria_satisfied=list(data.get("criteria_satisfied", [])),
+            criterion_results=dict(data.get("criterion_results", {})),
             next_round_plan=data.get("next_round_plan", ""),
             human_intervention=data.get("human_intervention", False),
         )
@@ -253,6 +257,7 @@ class RoundRecord:
             "issues": [i.to_dict() for i in self.issues],
             "verification": [v.to_dict() for v in self.verification],
             "criteria_satisfied": list(self.criteria_satisfied),
+            "criterion_results": dict(self.criterion_results),
             "next_round_plan": self.next_round_plan,
             "human_intervention": self.human_intervention,
         }

@@ -64,25 +64,51 @@ class SelfImprover:
 
         Relevance is token overlap (words of length >= 3), so it is deterministic and
         cheap enough to run every round. Empty objective (no content words) matches
-        nothing rather than everything.
+        nothing rather than everything. Includes both correct (repeat) and avoid lessons.
         """
+        return self._lessons(objective, correct=None, limit=limit)
+
+    def repeat_lessons(self, objective: str, limit: int = 5) -> list[MemoryFact]:
+        """Lessons worth repeating (``correct=True``): what worked, keep doing it."""
+        return self._lessons(objective, correct=True, limit=limit)
+
+    def avoid_lessons(self, objective: str, limit: int = 5) -> list[MemoryFact]:
+        """Lessons to avoid (``correct=False``): the standing Do-Not-Repeat list.
+
+        These are surfaced explicitly rather than filtered out, so a past mistake is
+        injected into the next run's steering instead of being invisible to it (D3).
+        """
+        return self._lessons(objective, correct=False, limit=limit)
+
+    def _lessons(self, objective: str, correct: bool | None, limit: int) -> list[MemoryFact]:
         tokens = _tokens(objective)
         if not tokens:
             return []
         matches = [
             fact
             for fact in self._hippocampus.facts()
-            if fact.key.startswith("self-improve::") and (tokens & _tokens(fact.value))
+            if fact.key.startswith("self-improve::")
+            and (correct is None or fact.correct is correct)
+            and (tokens & _tokens(fact.value))
         ]
         return matches[:limit]
 
     def steering_context(self, objective: str, limit: int = 5) -> str:
-        """Render relevant lessons as a block to prepend to the anti-drift steering."""
-        lessons = self.relevant_lessons(objective, limit=limit)
-        if not lessons:
+        """Render relevant lessons as a block to prepend to the anti-drift steering.
+
+        Repeat lessons appear under "Prior lessons"; avoid lessons are injected as a
+        standing "Do not repeat" instruction so past mistakes are never invisible.
+        """
+        repeats = self.repeat_lessons(objective, limit=limit)
+        avoids = self.avoid_lessons(objective, limit=limit)
+        if not repeats and not avoids:
             return ""
-        lines = [f"- {lesson.value}" for lesson in lessons]
-        return "## Prior lessons on similar goals\n" + "\n".join(lines)
+        lines = ["## Prior lessons on similar goals"]
+        lines.extend(f"- {lesson.value}" for lesson in repeats)
+        if avoids:
+            lines.extend(["", "## Do not repeat", ""])
+            lines.extend(f"- {lesson.value}" for lesson in avoids)
+        return "\n".join(lines)
 
 
 def _tokens(text: str) -> set[str]:

@@ -52,39 +52,105 @@ class Scheduler:
     testable.
     """
 
-    def __init__(self, runtime: GoalRuntime, runners: dict[str, Runner]) -> None:
+    def __init__(
+        self,
+        runtime: GoalRuntime,
+        runners: dict[str, Runner],
+        quarantine_after: int = 3,
+    ) -> None:
         self._runtime = runtime
         self._runners = runners
+        self._quarantine_after = quarantine_after
+        # Consecutive runner failures per thread (for poison-goal quarantine), and the
+        # set of thread ids already made terminal this batch (for re-entrant resume).
+        self._error_counts: dict[str, int] = {}
+        self._handled: set[str] = set()
+
+    @property
+    def handled(self) -> set[str]:
+        """Thread ids already driven terminal this batch; a re-entrant run skips them."""
+        return self._handled
+
+    def reset_batch(self) -> None:
+        """Start a fresh batch: forget which goals were handled and clear error counts."""
+        self._handled = set()
+        self._error_counts = {}
 
     def active_goals(self) -> list:
         """Active goals worth scheduling, as ``Continuation`` objects."""
         return self._runtime.resume_all()
 
-    def run_once(self) -> list[ScheduledRun]:
-        """Run every active goal serially to terminal, collecting one result each."""
+    def _backoff(self, attempt: int) -> float:
+        """Exponential backoff (seconds) for the ``attempt``-th retry."""
+        return min(1.0, 0.5 * 2 ** (attempt - 1))
+
+    def run_once(
+        self,
+        sleep: Callable[[float], None] = time.sleep,
+        max_retries: int = 0,
+    ) -> list[ScheduledRun]:
+        """Run every active goal serially to terminal, collecting one result each.
+
+        A transient runner failure is retried up to ``max_retries`` times with
+        exponential backoff (``sleep`` injectable for determinism) before being recorded
+        as ``errored``. A goal that errors ``quarantine_after`` consecutive times is set
+        aside by the runtime so it cannot spin the schedule forever. Threads already in
+        ``handled`` this batch are not reprocessed (re-entrant / post-restart resume).
+        """
         results: list[ScheduledRun] = []
         for cont in self._runtime.resume_all():
-            runner = self._runners.get(cont.thread_id)
+            tid = cont.thread_id
+            if tid in self._handled:
+                continue
+            runner = self._runners.get(tid)
             if runner is None:
                 results.append(
-                    ScheduledRun(
-                        cont.thread_id, cont.goal.objective, SKIPPED, "no runner registered"
-                    )
+                    ScheduledRun(tid, cont.goal.objective, SKIPPED, "no runner registered")
                 )
                 continue
-            try:
-                status = runner.run_until_terminal(cont.thread_id)
-                results.append(ScheduledRun(cont.thread_id, cont.goal.objective, status.value))
-            except Exception as exc:  # one crashed runner must not stop the batch
-                results.append(
-                    ScheduledRun(
-                        cont.thread_id,
-                        cont.goal.objective,
-                        ERRORED,
-                        f"{type(exc).__name__}: {exc}",
-                    )
-                )
+
+            status_str: str | None = None
+            summary = ""
+            failure: Exception | None = None
+            attempt = 0
+            while status_str is None:
+                try:
+                    status = runner.run_until_terminal(tid)
+                    status_str = status.value
+                except Exception as exc:  # one crashed runner must not stop the batch
+                    failure = exc
+                    attempt += 1
+                    if attempt > max_retries:
+                        break
+                    sleep(self._backoff(attempt))
+
+            if status_str is None:  # retries exhausted -> errored
+                status_str = ERRORED
+                summary = f"{type(failure).__name__}: {failure}"
+                self._note_error(tid, summary)
+            else:
+                self._note_success(tid)
+                self._mark_handled(tid, status_str)
+            results.append(ScheduledRun(tid, cont.goal.objective, status_str, summary))
         return results
+
+    def _note_error(self, thread_id: str, summary: str) -> None:
+        """Track a run failure; quarantine the goal once it exceeds the threshold."""
+        count = self._error_counts.get(thread_id, 0) + 1
+        self._error_counts[thread_id] = count
+        if count >= self._quarantine_after:
+            self._runtime.quarantine(thread_id, summary)
+            self._handled.add(thread_id)
+            self._error_counts.pop(thread_id, None)
+
+    def _note_success(self, thread_id: str) -> None:
+        """A clean run resets the consecutive-failure counter."""
+        self._error_counts.pop(thread_id, None)
+
+    def _mark_handled(self, thread_id: str, status_str: str) -> None:
+        """Record a terminal goal so a re-entrant run does not reprocess it."""
+        if status_str in (GoalStatus.COMPLETE.value, GoalStatus.BUDGET_LIMITED.value):
+            self._handled.add(thread_id)
 
     def morning_report(self, runs: list[ScheduledRun]) -> str:
         """Render a one-page morning summary: counts plus one line per goal."""
@@ -118,6 +184,7 @@ class Scheduler:
         batches: list[list[ScheduledRun]] = []
         cycles = 0
         while True:
+            self.reset_batch()
             batches.append(self.run_once())
             cycles += 1
             if stop_after is not None and cycles >= stop_after:

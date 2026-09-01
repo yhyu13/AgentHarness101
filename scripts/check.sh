@@ -10,3 +10,6 @@ python3 -m ruff check .
 
 echo "== test + coverage =="
 python3 -m pytest --cov --cov-report=term-missing "$@"
+
+echo "== per-package coverage gate =="
+python3 scripts/coverage_gate.py

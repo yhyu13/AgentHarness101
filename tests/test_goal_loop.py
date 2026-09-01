@@ -225,6 +225,67 @@ class TestGoalLoopRunner:
         assert "verdict=pass" in goal.last_blocked_reason
         assert "c1" in goal.last_blocked_reason
 
+    def test_records_per_criterion_verdicts(self, runtime: GoalRuntime, tmp_path: Path) -> None:
+        spec = make_spec(
+            criteria=[
+                AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"'),
+                AcceptanceCriterion("c2", "fail", verify_command='py -c "raise SystemExit(1)"'),
+            ]
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("implemented"),
+            StaticChecker(Verdict.PASS),
+            state_dir=tmp_path,
+        )
+        runner.run("t1")
+        record = runner._state.rounds[0]
+        assert record.criterion_results == {"c1": True, "c2": False}
+
+    def test_evidence_includes_command_stdout(self, runtime: GoalRuntime, tmp_path: Path) -> None:
+        spec = make_spec(
+            criteria=[
+                AcceptanceCriterion("c1", "pass", verify_command="py -c \"print('MARKER_XYZ')\"")
+            ]
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("implemented"),
+            StaticChecker(Verdict.PASS),
+            state_dir=tmp_path,
+        )
+        status = runner.run("t1")
+        assert status == GoalStatus.COMPLETE
+        goal = runtime._store.get("t1")
+        assert "MARKER_XYZ" in goal.last_blocked_reason
+
+    def test_human_intervention_checkpoint_pauses(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        def check(record: object) -> str | None:
+            return "needs human review of output"
+
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')]
+        )
+        runner = GoalLoopRunner(
+            spec,
+            runtime,
+            EchoMaker("implemented"),
+            StaticChecker(Verdict.PASS),
+            state_dir=tmp_path,
+            human_intervention_check=check,
+        )
+        status = runner.run("t1")
+        assert status == GoalStatus.PAUSED  # paused, not falsely complete
+        assert runner._state.status == "needs_input"
+        assert runner._state.human_interventions == 1
+        assert runner._state.rounds[0].human_intervention
+        goal = runtime._store.get("t1")
+        assert goal.status == GoalStatus.PAUSED
+
     def test_stops_at_max_rounds_without_completing(
         self, runtime: GoalRuntime, tmp_path: Path
     ) -> None:

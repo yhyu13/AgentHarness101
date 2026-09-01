@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from goal_loop.models import (
     AcceptanceCriterion,
@@ -52,6 +52,7 @@ class GoalLoopRunner:
         hippocampus: Hippocampus | None = None,
         world_verifier: WorldVerifier | None = None,
         self_improver: SelfImprover | None = None,
+        human_intervention_check: Optional[Callable[[RoundRecord], Optional[str]]] = None,
     ) -> None:
         self._spec = spec
         self._runtime = runtime
@@ -63,6 +64,7 @@ class GoalLoopRunner:
         self._hippocampus = hippocampus
         self._world_verifier = world_verifier
         self._self_improver = self_improver
+        self._human_intervention_check = human_intervention_check
         self._state_dir = Path(state_dir) if state_dir else Path(".")
         self._state = LoopState(loop_name=spec.objective)
         self._thread_id: Optional[str] = None
@@ -138,7 +140,11 @@ class GoalLoopRunner:
             f"criteria={','.join(criteria_satisfied)}",
         ]
         for r in results:
-            parts.append(f"{r.command}:{r.returncode}")
+            # Include captured stdout/stderr so the persisted evidence distinguishes a
+            # good exit-0 from a wrong exit-0, not just the return code.
+            out = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            parts.append(f"{r.command}:{r.returncode} out={out[:120]!r} err={err[:120]!r}")
         return "; ".join(parts)
 
     # ------------------------------------------------------------------ loop
@@ -240,10 +246,12 @@ class GoalLoopRunner:
                 )
 
             criteria_satisfied: list[str] = []
+            criterion_results: dict[str, bool] = {}
             results: list[VerificationResult] = []
             for criterion in self._spec.acceptance_criteria:
-                ok, criterion_results = self._verify_criterion(criterion, checker_output)
-                results.extend(criterion_results)
+                ok, criterion_results_list = self._verify_criterion(criterion, checker_output)
+                results.extend(criterion_results_list)
+                criterion_results[criterion.id] = ok
                 if ok:
                     criteria_satisfied.append(criterion.id)
 
@@ -252,9 +260,23 @@ class GoalLoopRunner:
             record.issues = list(checker_output.issues)
             record.verification = results
             record.criteria_satisfied = criteria_satisfied
+            record.criterion_results = criterion_results
             record.finished_at = _now()
 
             self._state.files_changed += len(maker_output.modified_files)
+
+            # Human-intervention checkpoint: pause (PAUSED is not terminal) rather than
+            # silently continue or falsely complete/block.
+            if self._human_intervention_check is not None:
+                pause_reason = self._human_intervention_check(record)
+                if pause_reason:
+                    record.human_intervention = True
+                    self._state.record_round(record)
+                    goal = self._runtime.pause(thread_id, pause_reason)
+                    self._finalize("needs_input", pause_reason)
+                    self._persist_state()
+                    break
+
             self._state.record_round(record)
 
             if self._trace_log is not None:

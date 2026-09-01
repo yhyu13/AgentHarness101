@@ -169,6 +169,134 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-01T04:07:43.971Z"
+    },
+    {
+      "id": "bug-011",
+      "timestamp": "2026-09-01T14:47:05.925Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/safety/safety.py",
+      "root_cause": "5 lines replaced/restructured",
+      "fix": "Rewrote 14→36 lines (5 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T14:47:05.925Z"
+    },
+    {
+      "id": "bug-012",
+      "timestamp": "2026-09-01T14:51:36.519Z",
+      "error_message": "Wrong reference: Optional should be Callable",
+      "file": "src/goal_loop/loop_runner.py",
+      "root_cause": "Used \"Optional\" instead of \"Callable\"",
+      "fix": "Changed Optional → Callable",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-09-01T14:52:41.312Z"
+    },
+    {
+      "id": "bug-013",
+      "timestamp": "2026-09-01T14:51:58.651Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/goal_loop/loop_runner.py",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 17→33 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T14:51:58.651Z"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-09-01T15:01:41.614Z",
+      "error_message": "Wrong return value",
+      "file": "src/goal_persistence/runtime.py",
+      "root_cause": "Was returning: self._store.transition(thread_id, GoalStatus.BLOCK",
+      "fix": "Now returns: result",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T15:01:41.614Z"
+    },
+    {
+      "id": "bug-015",
+      "timestamp": "2026-09-01T15:02:14.323Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/goal_persistence/runtime.py",
+      "root_cause": "8 lines replaced/restructured",
+      "fix": "Rewrote 13→3 lines (8 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T15:02:14.323Z"
+    },
+    {
+      "id": "bug-016",
+      "timestamp": "2026-09-01T15:03:05.274Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/goal_loop/scheduler.py",
+      "root_cause": "13 lines replaced/restructured",
+      "fix": "Rewrote 33→99 lines (13 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T15:03:05.274Z"
+    },
+    {
+      "id": "bug-017",
+      "timestamp": "2026-09-01T15:07:41.712Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/context_compaction/compactor.py",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 87→123 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T15:07:41.712Z"
+    },
+    {
+      "id": "bug-018",
+      "timestamp": "2026-09-01T15:08:08.586Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/goal_loop/self_improver.py",
+      "root_cause": "7 lines replaced/restructured",
+      "fix": "Rewrote 24→52 lines (7 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-01T15:08:08.586Z"
     }
   ]
 }

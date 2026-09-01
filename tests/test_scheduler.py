@@ -141,3 +141,74 @@ class TestScheduler:
         scheduler = Scheduler(runtime, {"t1": _Runner(GoalStatus.ACTIVE)})
         batches = scheduler.run_periodic(sleep=lambda s: None, stop_after=3)
         assert len(batches) == 3
+
+
+class _FlakyRunner:
+    """A runner that raises a transient error ``failures`` times, then succeeds."""
+
+    def __init__(self, failures: int, result: GoalStatus = GoalStatus.COMPLETE) -> None:
+        self._remaining = failures
+        self._result = result
+        self.sleeps: list[float] = []
+
+    def run_until_terminal(self, thread_id: str, **kwargs) -> GoalStatus:
+        if self._remaining > 0:
+            self._remaining -= 1
+            raise ConnectionError("transient: connection reset")
+        return self._result
+
+
+class _AlwaysFailRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run_until_terminal(self, thread_id: str, **kwargs) -> GoalStatus:
+        self.calls += 1
+        raise ConnectionError("persistent failure")
+
+
+class TestRetryBackoff:
+    def test_run_once_retries_transient_then_succeeds(self, runtime: GoalRuntime) -> None:
+        # C2: a transient runner failure must be retried, not immediately ERRORED.
+        _active(runtime, "t1")
+        sleeps: list[float] = []
+        runner = _FlakyRunner(failures=2)
+        scheduler = Scheduler(runtime, {"t1": runner})
+        results = scheduler.run_once(sleep=sleeps.append, max_retries=3)
+        assert results[0].status == "complete"
+        assert len(sleeps) == 2  # backoff between the two retries
+        assert sleeps[0] > 0 and sleeps[1] > sleeps[0]
+
+    def test_run_once_records_errored_after_exhausting_retries(self, runtime: GoalRuntime) -> None:
+        _active(runtime, "t1")
+        scheduler = Scheduler(runtime, {"t1": _AlwaysFailRunner()})
+        results = scheduler.run_once(sleep=lambda s: None, max_retries=2)
+        assert results[0].status == "errored"
+
+
+class TestQuarantineAfterRepeatedErrors:
+    def test_goal_quarantined_after_consecutive_errors(self, runtime: GoalRuntime) -> None:
+        # C4: a goal that keeps erroring is set aside so it cannot spin the batch forever.
+        _active(runtime, "t1")
+        runner = _AlwaysFailRunner()
+        scheduler = Scheduler(runtime, {"t1": runner}, quarantine_after=3)
+        for _ in range(3):
+            scheduler.run_once(sleep=lambda s: None)
+        # After 3 consecutive errors the goal is no longer active → excluded next cycle.
+        assert runtime.get_goal("t1").status == GoalStatus.QUARANTINED
+        assert scheduler.run_once(sleep=lambda s: None) == []
+
+
+class TestReentrantResume:
+    def test_handled_goals_are_not_reprocessed_within_batch(self, runtime: GoalRuntime) -> None:
+        # C6: a goal driven terminal this batch is recorded as handled; a re-entrant
+        # run_once (e.g. after a restart mid-batch) must not process it a second time.
+        _active(runtime, "t1")
+        scheduler = Scheduler(runtime, {"t1": _Runner(GoalStatus.COMPLETE)})
+        first = scheduler.run_once()
+        assert first[0].status == "complete"
+        assert "t1" in scheduler.handled
+        second = scheduler.run_once()
+        assert [r.thread_id for r in second if r.status != "skipped"] == []
+        scheduler.reset_batch()
+        assert scheduler.handled == set()

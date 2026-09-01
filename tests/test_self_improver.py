@@ -98,6 +98,28 @@ class TestSelfImprover:
         assert "Prior lessons" in ctx
         assert "[avoid]" in ctx
 
+    def test_avoid_lessons_surface_as_standing_do_not_repeat(
+        self, hippocampus: Hippocampus
+    ) -> None:
+        # D3: a correct=False (avoid) lesson must be injected into the steering as a
+        # standing "do not repeat" instruction — not filtered out by a correct-only view.
+        improver = SelfImprover(hippocampus)
+        improver.distill("t1", _objective(), "blocked", "never call foo() twice")
+        ctx = improver.steering_context(_objective())
+        assert "Do not repeat" in ctx
+        assert "never call foo() twice" in ctx
+        assert "Prior lessons" in ctx
+
+    def test_repeat_and_avoid_lessons_are_separated(self, hippocampus: Hippocampus) -> None:
+        improver = SelfImprover(hippocampus)
+        improver.distill("t1", _objective(), "complete", "iterative worked")
+        improver.distill("t2", _objective(), "blocked", "avoid the x path")
+        assert any("[repeat]" in f.value for f in improver.repeat_lessons(_objective()))
+        assert any("[avoid]" in f.value for f in improver.avoid_lessons(_objective()))
+        ctx = improver.steering_context(_objective())
+        assert "iterative worked" in ctx
+        assert "avoid the x path" in ctx
+
     def test_distill_is_persisted_and_readable(self, hippocampus: Hippocampus) -> None:
         SelfImprover(hippocampus).distill("t1", _objective(), "complete", "done")
         assert hippocampus.get("self-improve::t1") is not None

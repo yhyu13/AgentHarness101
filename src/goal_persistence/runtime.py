@@ -93,6 +93,9 @@ class GoalRuntime:
             raise RuntimeError(f"Goal {thread_id} is not active ({goal.status.value})")
         acc = TurnAccounting()
         self._active_turns[thread_id] = acc
+        # Crash-safe marker: persist that a turn is in flight so an abrupt process
+        # death between start and end is reconciled on the next launch (C1/C18).
+        self._store.mark_in_flight(thread_id, datetime.now(timezone.utc))
         return acc
 
     def end_turn(self, thread_id: str, status_override: Optional[GoalStatus] = None) -> Goal:
@@ -104,6 +107,7 @@ class GoalRuntime:
         acc = self._active_turns.pop(thread_id, None)
         if acc is None:
             raise RuntimeError(f"No active turn for thread {thread_id}")
+        self._store.clear_in_flight(thread_id)
         goal = self._store.apply_usage(thread_id, acc.to_usage())
         if status_override is not None:
             goal = self._store.transition(thread_id, status_override)
@@ -180,7 +184,9 @@ class GoalRuntime:
             raise KeyError(f"Goal not found for thread {thread_id}")
         # Evidence is captured in the blocked/last_reason field temporarily to
         # keep the schema simple; in production this would be a separate table.
-        return self._store.transition(thread_id, GoalStatus.COMPLETE, reason=evidence)
+        result = self._store.transition(thread_id, GoalStatus.COMPLETE, reason=evidence)
+        self.record_run(thread_id, "completed", summary=evidence)
+        return result
 
     def mark_blocked(self, thread_id: str, reason: str) -> Goal:
         """Blocked audit: only mark blocked after 3 consecutive blocked turns.
@@ -194,7 +200,9 @@ class GoalRuntime:
         new_count = goal.blocked_count + 1
 
         if new_count >= self.BLOCKED_THRESHOLD:
-            return self._store.transition(thread_id, GoalStatus.BLOCKED, reason=reason)
+            result = self._store.transition(thread_id, GoalStatus.BLOCKED, reason=reason)
+            self.record_run(thread_id, "blocked", summary=reason)
+            return result
 
         # Not enough consecutive blocked turns yet; just record the reason
         # by updating the row directly. We reuse blocked_count to count
@@ -204,6 +212,20 @@ class GoalRuntime:
         goal.updated_at = datetime.now(timezone.utc)
         self._store.save(goal)
         return goal
+
+    def pause(self, thread_id: str, reason: str = "") -> Goal:
+        """Human-intervention checkpoint: pause an active goal mid-run.
+
+        ``PAUSED`` is not terminal — the goal can be resumed (``PAUSED -> ACTIVE``), so a
+        checkpoint waits for a human rather than falsely completing or blocking. The
+        reason is recorded for the operator to pick up.
+        """
+        goal = self._store.get(thread_id)
+        if goal is None:
+            raise KeyError(f"Goal not found for thread {thread_id}")
+        if goal.status != GoalStatus.ACTIVE:
+            return goal
+        return self._store.transition(thread_id, GoalStatus.PAUSED, reason=reason)
 
     def unblock(self, thread_id: str) -> Goal:
         """Move a blocked goal back to active, resetting the blocked counter.
@@ -219,5 +241,104 @@ class GoalRuntime:
         goal.updated_at = datetime.now(timezone.utc)
         if goal.status == GoalStatus.ACTIVE:
             self._store.save(goal)
+            return goal
+        return self._store.transition(thread_id, GoalStatus.ACTIVE)
+
+    # ------------------------------------------------------------------ resilience (Cluster C)
+
+    def record_run(self, thread_id: str, outcome: str, summary: str = "", rounds: int = 0) -> None:
+        """Append one outcome to the durable run ledger (C3).
+
+        ``outcome`` is one of ``completed`` / ``blocked`` / ``quarantined`` /
+        ``aborted`` — a coarse classifier of how the goal left the schedule, distinct
+        from the precise ``status`` value. Usage is read from the durable goal row.
+        """
+        goal = self._store.get(thread_id)
+        status = goal.status.value if goal is not None else ""
+        usage_tokens = goal.usage.tokens if goal is not None else 0
+        self._store.record_run(
+            thread_id,
+            status=status,
+            outcome=outcome,
+            summary=summary,
+            rounds=rounds,
+            usage_tokens=usage_tokens,
+        )
+
+    def reconcile_in_flight(self, abandon_after_s: float) -> list[dict[str, object]]:
+        """Crash recovery: close out any dangling in-flight turn marker (C1/C18).
+
+        On startup a turn marked in-flight but never ended means the process died
+        mid-turn. After ``abandon_after_s`` seconds (so a genuinely-running turn is not
+        mistaken for a crash) the marker is cleared and an ``aborted`` run is recorded.
+        Returns one dict per reconciled turn.
+        """
+        from datetime import datetime as _dt
+
+        aborted: list[dict[str, object]] = []
+        now = _dt.now(timezone.utc)
+        for thread_id in self._store.list_in_flight():
+            if thread_id in self._active_turns:
+                continue  # legitimately running; not a crash
+            row = self._store.get_in_flight(thread_id)
+            if row is None:
+                continue
+            started_at = _dt.fromisoformat(row["started_at"])
+            if started_at.tzinfo is None:  # treat a naive stored stamp as UTC
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            if (now - started_at).total_seconds() <= abandon_after_s:
+                continue  # fresh marker; still plausibly running
+            self._store.clear_in_flight(thread_id)
+            self.record_run(thread_id, "aborted", summary="turn died mid-flight")
+            aborted.append(
+                {
+                    "thread_id": thread_id,
+                    "started_at": row["started_at"],
+                    "outcome": "aborted",
+                }
+            )
+        return aborted
+
+    def budget_exceeded(self, thread_id: str) -> Optional[GoalStatus]:
+        """Mid-turn budget judgment: is the projected usage already over budget? (C5)
+
+        Measured as durable usage + the in-flight turn's live accrual, so a long round
+        is bounded before it is flushed at ``end_turn``. Returns ``BUDGET_LIMITED`` if
+        over either budget, else ``None``.
+        """
+        goal = self._store.get(thread_id)
+        if goal is None:
+            raise KeyError(f"Goal not found for thread {thread_id}")
+        projected = goal.usage
+        acc = self._active_turns.get(thread_id)
+        if acc is not None:
+            projected = projected.add(acc.to_usage())
+        over_tokens = goal.budget_tokens is not None and projected.tokens > goal.budget_tokens
+        over_wall = goal.budget_wall_ms is not None and projected.wall_ms > goal.budget_wall_ms
+        if over_tokens or over_wall:
+            return GoalStatus.BUDGET_LIMITED
+        return None
+
+    def quarantine(self, thread_id: str, reason: str) -> Goal:
+        """Set aside a poison goal that keeps failing (C4).
+
+        ``QUARANTINED`` is not terminal and drops out of ``resume_all``, so a repeatedly
+        crashing goal stops spinning the schedule until an operator re-arms it.
+        """
+        goal = self._store.get(thread_id)
+        if goal is None:
+            raise KeyError(f"Goal not found for thread {thread_id}")
+        if goal.status != GoalStatus.ACTIVE:
+            return goal
+        result = self._store.transition(thread_id, GoalStatus.QUARANTINED, reason=reason)
+        self.record_run(thread_id, "quarantined", summary=reason)
+        return result
+
+    def unquarantine(self, thread_id: str) -> Goal:
+        """Re-arm a quarantined goal back to active after operator review."""
+        goal = self._store.get(thread_id)
+        if goal is None:
+            raise KeyError(f"Goal not found for thread {thread_id}")
+        if goal.status != GoalStatus.QUARANTINED:
             return goal
         return self._store.transition(thread_id, GoalStatus.ACTIVE)

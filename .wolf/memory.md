@@ -271,3 +271,75 @@
 | 14:02 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~20415 tok |
 | 14:13 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 10 reads | ~23829 tok |
 | 14:15 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 10 reads | ~23829 tok |
+| 14:30 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 10 reads | ~23829 tok |
+
+## Session: 2026-09-01 20:49
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 20:54 | Created doc/roadmap/enhancements_100.md | — | ~2605 |
+| 22:44 | Edited tests/test_harness_layers.py | added 2 import(s) | ~43 |
+| 22:45 | Edited tests/test_harness_layers.py | modified test_allowlisted_command_runs() | ~681 |
+| 22:45 | Edited tests/test_harness_layers.py | modified test_high_risk_requires_human() | ~328 |
+| 22:46 | Created src/sandbox/sandbox.py | — | ~1523 |
+| 22:46 | Edited src/safety/safety.py | modified Approval() | ~259 |
+| 22:47 | Edited src/safety/safety.py | modified request() | ~439 |
+| 22:49 | Edited src/sandbox/sandbox.py | 6→6 lines | ~106 |
+| 22:50 | Edited src/goal_loop/models.py | 10→13 lines | ~181 |
+| 22:51 | Edited src/goal_loop/models.py | modified to_dict() | ~314 |
+| 22:51 | Edited src/goal_persistence/runtime.py | modified pause() | ~204 |
+| 22:51 | Edited src/goal_loop/loop_runner.py | inline fix | ~11 |
+| 22:51 | Edited src/goal_loop/loop_runner.py | 16→18 lines | ~234 |
+| 22:51 | Edited src/goal_loop/loop_runner.py | 7→11 lines | ~151 |
+| 22:51 | Edited src/goal_loop/loop_runner.py | expanded (+16 lines) | ~461 |
+| 22:52 | Edited src/goal_loop/loop_runner.py | 13→13 lines | ~190 |
+| 22:52 | Edited src/goal_loop/loop_runner.py | inline fix | ~26 |
+| 22:52 | Edited tests/test_goal_loop.py | modified test_records_per_criterion_verdicts() | ~663 |
+| 22:59 | Created tests/test_persistence_resilience.py | — | ~1874 |
+| 23:00 | Edited tests/test_scheduler.py | modified test_run_periodic_respects_stop_after() | ~976 |
+| 23:00 | Edited src/goal_persistence/models.py | 6→7 lines | ~71 |
+| 23:00 | Edited src/goal_persistence/models.py | 4→5 lines | ~48 |
+| 23:00 | Edited src/goal_persistence/models.py | 4→5 lines | ~79 |
+| 23:01 | Edited src/goal_persistence/store.py | expanded (+14 lines) | ~230 |
+| 23:01 | Edited src/goal_persistence/store.py | modified list_active() | ~894 |
+| 23:01 | Edited src/goal_persistence/store.py | added 1 import(s) | ~45 |
+| 23:01 | Edited src/goal_persistence/runtime.py | modified end_turn() | ~288 |
+| 23:01 | Edited src/goal_persistence/runtime.py | modified mark_complete() | ~173 |
+| 23:01 | Edited src/goal_persistence/runtime.py | 2→4 lines | ~66 |
+| 23:01 | Edited src/goal_persistence/runtime.py | added 1 condition(s) | ~1461 |
+| 23:02 | Edited src/goal_persistence/store.py | modified list_in_flight() | ~198 |
+| 23:02 | Edited src/goal_persistence/runtime.py | _read_in_flight() → get_in_flight() | ~62 |
+| 23:02 | Edited src/goal_persistence/runtime.py | reduced (-10 lines) | ~41 |
+| 23:03 | Edited src/goal_loop/scheduler.py | modified __init__() | ~1206 |
+| 23:03 | Edited src/goal_loop/scheduler.py | 4→5 lines | ~46 |
+| 23:03 | Edited src/goal_persistence/runtime.py | 2→4 lines | ~80 |
+| 23:06 | Created tests/test_context_budget.py | — | ~1019 |
+| 23:06 | Edited tests/test_self_improver.py | modified test_steering_context_renders_prior_lessons() | ~442 |
+| 23:07 | Edited src/context_compaction/compactor.py | modified __init__() | ~1420 |
+| 23:08 | Edited src/goal_loop/self_improver.py | modified relevant_lessons() | ~699 |
+| 23:08 | Edited src/context_compaction/compactor.py | 12→14 lines | ~228 |
+| 23:10 | Created tests/test_eval_cost_trace.py | — | ~1290 |
+| 23:11 | Created src/eval_harness/gate.py | — | ~948 |
+| 23:11 | Edited src/eval_harness/__init__.py | 13→16 lines | ~115 |
+| 23:11 | Edited src/cost_control/cost.py | modified BudgetError() | ~83 |
+| 23:11 | Edited src/cost_control/cost.py | modified guard_budget() | ~517 |
+| 23:11 | Edited src/cost_control/__init__.py | expanded (+13 lines) | ~121 |
+| 23:12 | Edited src/observability/trace.py | modified _redact_text() | ~474 |
+| 23:12 | Edited src/observability/trace.py | modified __init__() | ~142 |
+| 23:16 | Created tests/test_packaging.py | — | ~695 |
+| 23:16 | Edited tests/test_coverage_gate.py | modified test_coverage_report_has_fail_under_and_show_missing() | ~300 |
+| 23:17 | Edited pyproject.toml | 3→7 lines | ~38 |
+| 23:17 | Edited pyproject.toml | expanded (+9 lines) | ~65 |
+| 23:17 | Edited pyproject.toml | expanded (+6 lines) | ~96 |
+| 23:17 | Created src/agent_harness/__init__.py | — | ~98 |
+| 23:17 | Created src/agent_harness/cli.py | — | ~351 |
+| 23:17 | Created src/agent_harness/__main__.py | — | ~33 |
+| 23:17 | Created src/agent_harness/py.typed | — | ~0 |
+| 23:18 | Created scripts/coverage_gate.py | — | ~1081 |
+| 23:18 | Edited scripts/check.sh | 2→5 lines | ~42 |
+| 23:19 | Edited scripts/coverage_gate.py | added 1 import(s) | ~333 |
+| 23:19 | Edited scripts/coverage_gate.py | modified endswith() | ~124 |
+| 23:21 | Edited tests/test_packaging.py | modified test_cli_package_ships_py_typed() | ~111 |
+| 23:22 | Edited tests/test_packaging.py | _packages() → line() | ~95 |
+| 23:24 | Edited pyproject.toml | 4→4 lines | ~25 |
+| 23:26 | Edited tests/test_harness_layers.py | 3→2 lines | ~10 |

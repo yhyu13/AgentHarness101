@@ -19,6 +19,7 @@ class GoalStatus(str, enum.Enum):
     USAGE_LIMITED = "usage_limited"
     BUDGET_LIMITED = "budget_limited"
     COMPLETE = "complete"
+    QUARANTINED = "quarantined"  # set aside after repeated failures; re-armable
 
     @property
     def is_terminal(self) -> bool:
@@ -33,10 +34,12 @@ ALLOWED_TRANSITIONS: dict[GoalStatus, set[GoalStatus]] = {
         GoalStatus.USAGE_LIMITED,
         GoalStatus.BUDGET_LIMITED,
         GoalStatus.COMPLETE,
+        GoalStatus.QUARANTINED,
     },
     GoalStatus.PAUSED: {GoalStatus.ACTIVE, GoalStatus.COMPLETE},
     GoalStatus.BLOCKED: {GoalStatus.ACTIVE, GoalStatus.PAUSED, GoalStatus.COMPLETE},
     GoalStatus.USAGE_LIMITED: {GoalStatus.ACTIVE, GoalStatus.PAUSED},
+    GoalStatus.QUARANTINED: {GoalStatus.ACTIVE},  # re-armable after operator review
     # Terminal states have no outgoing transitions.
     GoalStatus.BUDGET_LIMITED: set(),
     GoalStatus.COMPLETE: set(),

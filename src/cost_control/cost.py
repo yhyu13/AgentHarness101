@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+
+
+class BudgetError(RuntimeError):
+    """Raised when a run's estimated cost would exceed the caller's ceiling."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +36,49 @@ def estimate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
         raise KeyError(f"no pricing for model {model!r}")
     price = PRICING[model]
     return (tokens_input * price.input_per_1k + tokens_output * price.output_per_1k) / 1000.0
+
+
+def guard_budget(model: str, *, tokens_input: int, tokens_output: int, max_usd: float) -> float:
+    """Refuse to start a run when its estimated cost would exceed ``max_usd`` (E2).
+
+    Returns the estimated cost on success (so the caller can log/assert it); raises
+    ``BudgetError`` when the estimate exceeds the ceiling and ``KeyError`` for an unknown
+    model (fail-closed — never silently price at 0). A guard is a gate, not an accounting
+    record: it blocks an over-budget *start* before any spend, rather than tracking after.
+    """
+    cost = estimate_cost(model, tokens_input, tokens_output)
+    if cost > max_usd:
+        raise BudgetError(
+            f"estimated cost ${cost:.4f} for model {model!r} exceeds budget ${max_usd:.4f}"
+        )
+    return cost
+
+
+def trace_cost(
+    trace_log: Callable[[str, Any], None],
+    model: str,
+    *,
+    tokens_input: int,
+    tokens_output: int,
+) -> float:
+    """Emit one cost trace event for an LLM call, returning the cost (E3).
+
+    ``trace_log`` is any object exposing ``append(event_type, payload)`` — a real
+    ``TraceLog`` or a test spy — so this stays decoupled from the observability layer.
+    The cost is folded inline into the event stream so each call's spend is visible
+    where it happens, not recomputed later.
+    """
+    cost = estimate_cost(model, tokens_input, tokens_output)
+    trace_log.append(
+        "cost",
+        {
+            "model": model,
+            "tokens_input": tokens_input,
+            "tokens_output": tokens_output,
+            "cost_usd": round(cost, 6),
+        },
+    )
+    return cost
 
 
 @dataclass(frozen=True, slots=True)
