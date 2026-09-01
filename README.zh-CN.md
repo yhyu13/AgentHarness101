@@ -77,29 +77,17 @@ scripts/check.sh                     # 四闸：format + lint + test + coverage
 `[tool.coverage]`）。覆盖 happy path、fail-closed、红队对抗、全系统 E2E 四类场景；另有 56 条 opt-in 真 LLM 四维评测（`RUN_REAL_LLM=1` 时跑，见下文「真 LLM 深度评测」）。
 未覆盖的 ~2.82% 是防御性校验 / 跳过分支 / 恢复终态 goal 的 resume 分支，不是死代码。
 
-## 真 LLM 基线
-
-用真实模型跑通一次 harness（`examples/llm_goal_loop.py`）：
-
-| 指标 | 值 |
-|---|---|
-| 模型 | `deepseek/deepseek-v4-pro`（经 `https://llm-proxy.tapsvc.com`，`ANTHROPIC_AUTH_TOKEN`） |
-| 终态 | complete / 1 轮 |
-| token | ~185（首次冷缓存 565，随缓存波动） |
-| 墙钟 | 5.19–7.50s / 平均 6.21s |
-
-真数字与「只 mock LLM 边界、其余跑真货」的分工见 `doc/04_faux_provider/benchmark.md`。
-
 ## 真 LLM 深度评测（opt-in）
 
-上表只测了一条 happy path，够验证「能跑」，不够量化「多稳」。`eval_llm/` + `tests/test_real_llm.py` 把评测扩成 **四维 × 5 模型**：
+`eval_llm/` + `tests/test_real_llm.py` 用真模型跑四维（广度 / 单 loop 终态 / 真实计量 / 红队）× 5 模型（deepseek-v4-pro/flash、grok-4.6、minimax-m3、kimi-k2-turbo-preview，glm 无额度排除），56 条全绿。跑出来的教训比「都过了」值钱：
 
-- **广度**：每个 harness LLM 边界都接真模型（maker / LLMJudge / summarizer）
-- **深度**：单 loop 终态（complete / blocked 三振 / budget_limited / stopped_max_rounds）
-- **数字**：真实 latency mean±std、token、成本
-- **红队**：真对抗模型 vs 确定性守卫（注入 / 自报 / 高风险动作）
+- **接模型先分 API 格式。** 分两派：deepseek/grok/minimax 走 Anthropic 兼容（`/v1/messages`），kimi 走 OpenAI 兼容（`/chat/completions`）。用 Anthropic 客户端调 kimi 直接 404，别硬套。
+- **thinking 模型会吃 `max_tokens`。** kimi 的 `reasoning_content`、deepseek 的 `ThinkingBlock` 先把预算花在推理上，`max_tokens≤128` 时 kimi 的 judge/summarizer 返回空内容、被误判 FAIL，提到 512 才转绿。提取正文要过滤 `b.type == "text"`，不能假设 `content[0]` 是正文。
+- **token 记账别减缓存。** llm-proxy 把 `input_tokens` 和 `cache_read_input_tokens` 报成互不重叠的两桶，`input - cache + output` 算出负值（实测 -97），用 `input + output`。
+- **延迟方差跨模型差一个量级。** grok-4.6 平均 15.2s、std 17.0s（慢且抖），deepseek-v4-flash 平均 3.1s。设超时得看分布，不是只看均值。
+- **红队全模型守住。** 注入 / 自报 / 高风险动作，5 个模型都到不了 complete——机器校验和确定性守卫跨模型成立。
 
-5 个可用模型：deepseek-v4-pro/flash、grok-4.6、minimax-m3 走 Anthropic 格式，kimi-k2-turbo-preview 走 OpenAI 格式（glm 无额度排除），56 条全绿。套件默认 skip，显式 `RUN_REAL_LLM=1` 才跑；单模型挂掉 graceful skip 不拖垮整批；真数字见 `doc/10_real_llm_eval/report.md`。
+套件默认 skip，`RUN_REAL_LLM=1` 显式跑；单模型挂掉 graceful skip 不拖垮整批。真数字（每模型 latency mean±std、各终态 token/墙钟）见 `doc/10_real_llm_eval/report.md`。
 
 ## goal_loop 用法
 

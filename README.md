@@ -178,7 +178,15 @@ coverage: 97.18%.
 `eval_llm/` + `tests/test_real_llm.py` exercise every harness LLM boundary against 5
 real models (deepseek-v4-pro/flash, grok-4.6, minimax-m3, kimi-k2-turbo-preview) across
 four dimensions — breadth, single-loop terminal states, real latency/token variance,
-and red-team. It burns real API, so it's opt-in and skipped by default:
+and red-team — 56 tests, all green. The lessons are worth more than the pass rate:
+
+- **Two API formats.** deepseek/grok/minimax are Anthropic-compatible (`/v1/messages`); kimi is OpenAI-compatible (`/chat/completions`). An Anthropic client against kimi 404s — check the format before plugging a new model in.
+- **Thinking models burn `max_tokens`.** kimi's `reasoning_content` and deepseek's `ThinkingBlock` spend the budget on reasoning first; at `max_tokens≤128` kimi's judge/summarizer return empty content and false-fail. Extract text via `b.type == "text"`, and give thinking models ≥512 tokens.
+- **Don't subtract cache from token accounting.** llm-proxy reports `input_tokens` and `cache_read_input_tokens` as disjoint buckets; `input - cache + output` goes negative (-97). Use `input + output`.
+- **Latency variance spans an order of magnitude.** grok-4.6 averages 15.2s with std 17.0s; deepseek-v4-flash averages 3.1s. Set timeouts on the distribution, not the mean.
+- **Red-team holds on every model.** Injection, self-report, and high-risk actions never reach `complete` — the machine checks are model-independent.
+
+It burns real API, so it's opt-in and skipped by default:
 
 ```bash
 RUN_REAL_LLM=1 python3 -m pytest tests/test_real_llm.py -q
@@ -279,9 +287,9 @@ ANTHROPIC_MODEL=deepseek/deepseek-v4-pro
 ANTHROPIC_AUTH_TOKEN=...
 ```
 
-The current verified real-LLM baseline uses `deepseek/deepseek-v4-pro` (see
-`doc/04_faux_provider/benchmark.md`). The "Result" table below was captured on the
-earlier MiniMax endpoint and is kept as a historical run.
+The real-LLM eval now spans 5 models × 4 dimensions — see "Real-LLM deep eval" above.
+The "Result" table below was captured on the earlier MiniMax endpoint and is kept as a
+historical run.
 
 Result:
 
