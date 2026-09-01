@@ -3,9 +3,8 @@ safety, and cost control."""
 
 from pathlib import Path
 
-import pytest
 
-from tool_registry import Permission, ToolRegistry, ToolResult, ToolSpec
+from tool_registry import Permission, ToolRegistry, ToolSpec
 from sandbox import Sandbox
 from eval_harness import EvalCase, EvalRunner, ExactJudge
 from observability import TraceLog

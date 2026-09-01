@@ -12,7 +12,7 @@ Run:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from goal_loop import (
     AcceptanceCriterion,
@@ -22,7 +22,6 @@ from goal_loop import (
     GoalSpec,
     MakerOutput,
     Scope,
-    StaticChecker,
     StopCondition,
     Verdict,
 )
@@ -86,9 +85,7 @@ def main() -> None:
             AcceptanceCriterion(
                 "c1",
                 "artifact contains 'ok'",
-                verify_command=(
-                    f"py -c \"assert open({str(artifact)!r}).read().strip() == 'ok'\""
-                ),
+                verify_command=(f"py -c \"assert open({str(artifact)!r}).read().strip() == 'ok'\""),
             ),
         ],
         scope=Scope(fair_game=[str(artifact)], hands_off=["goal_persistence/"]),

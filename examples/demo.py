@@ -7,9 +7,9 @@ Run from the repo root:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from goal_persistence import GoalRuntime, GoalStatus, GoalStore
+from goal_persistence import GoalRuntime, GoalStore
 
 DB = Path(__file__).with_name("demo_goals.db")
 if DB.exists():

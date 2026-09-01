@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from goal_persistence.accounting import TurnAccounting
-from goal_persistence.models import Goal, GoalStatus, TransitionError, Usage
+from goal_persistence.models import Goal, GoalStatus
 from goal_persistence.store import GoalStore
 
 

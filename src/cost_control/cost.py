@@ -6,6 +6,35 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True, slots=True)
+class Price:
+    """Per-model unit price, in USD per 1,000 tokens."""
+
+    input_per_1k: float
+    output_per_1k: float
+
+
+# Illustrative tiered prices (USD / 1k tokens). Real vendor numbers are "待确认" and
+# belong in a config/ledger keyed by the live model id; this table only pins the
+# calculator's determinism, not real-world correctness.
+PRICING: dict[str, Price] = {
+    "mini": Price(input_per_1k=0.10, output_per_1k=0.30),
+    "small": Price(input_per_1k=0.30, output_per_1k=0.90),
+    "large": Price(input_per_1k=3.00, output_per_1k=15.00),
+}
+
+
+def estimate_cost(model: str, tokens_input: int, tokens_output: int) -> float:
+    """Estimate USD cost for ``model`` given honest input/output token counts.
+
+    Unknown model raises ``KeyError`` (fail-closed: never silently price at 0).
+    """
+    if model not in PRICING:
+        raise KeyError(f"no pricing for model {model!r}")
+    price = PRICING[model]
+    return (tokens_input * price.input_per_1k + tokens_output * price.output_per_1k) / 1000.0
+
+
+@dataclass(frozen=True, slots=True)
 class RateLimit:
     """A token-bucket rate limiter: max ``capacity`` calls per ``period_s`` seconds."""
 

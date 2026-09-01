@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 from hippocampus.models import MemoryFact, ReplayResult, Trajectory, TrajectoryStep
 from hippocampus.store import HippocampusStore
@@ -64,9 +64,7 @@ class Hippocampus:
         trajectory = self._store.load_trajectory(task_id)
         if trajectory is None:
             return None
-        important_lines = [
-            step.important for step in trajectory.steps if step.important
-        ]
+        important_lines = [step.important for step in trajectory.steps if step.important]
         return ReplayResult(trajectory=trajectory, important_lines=important_lines)
 
     def retrospective(self) -> list[MemoryFact]:

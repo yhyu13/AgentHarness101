@@ -25,6 +25,8 @@ from goal_loop.models import (
 from goal_loop.roles import Checker, EchoMaker, Maker, StaticChecker
 from goal_loop.registered_roles import RegisteredChecker, RegisteredMaker
 from goal_loop.self_improver import SelfImprover
+from goal_loop.scheduler import Scheduler, ScheduledRun
+from goal_loop.orchestrator import Orchestrator, Plan
 from goal_loop.verifier import CommandVerifier
 
 __all__ = [
@@ -50,4 +52,8 @@ __all__ = [
     "RegisteredChecker",
     "CommandVerifier",
     "SelfImprover",
+    "Scheduler",
+    "ScheduledRun",
+    "Orchestrator",
+    "Plan",
 ]

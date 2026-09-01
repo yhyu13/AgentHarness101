@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from goal_loop import (
     AcceptanceCriterion,
@@ -77,10 +77,14 @@ def _measure_loop() -> dict:
         objective="produce two verified artifacts incrementally",
         acceptance_criteria=[
             AcceptanceCriterion(
-                "a", "a == 'ok'", verify_command=f"py -c \"assert open({str(artifact_a)!r}).read() == 'ok'\""
+                "a",
+                "a == 'ok'",
+                verify_command=f"py -c \"assert open({str(artifact_a)!r}).read() == 'ok'\"",
             ),
             AcceptanceCriterion(
-                "b", "b == 'ok'", verify_command=f"py -c \"assert open({str(artifact_b)!r}).read() == 'ok'\""
+                "b",
+                "b == 'ok'",
+                verify_command=f"py -c \"assert open({str(artifact_b)!r}).read() == 'ok'\"",
             ),
         ],
         stop_conditions=[StopCondition(kind="max_rounds", value=10)],
@@ -105,9 +109,7 @@ def _measure_loop() -> dict:
 
 def _measure_compaction() -> dict:
     items = [ContextItem(f"imp-{i}", f"CRITICAL fact {i}", important=True) for i in range(10)]
-    items += [
-        ContextItem(f"noise-{i}", f"verbose transcript line {i} " * 20) for i in range(90)
-    ]
+    items += [ContextItem(f"noise-{i}", f"verbose transcript line {i} " * 20) for i in range(90)]
     total_chars = sum(len(i.content) for i in items)
 
     compactor = ContextCompactor(threshold=0, threshold_ratio=0.8)

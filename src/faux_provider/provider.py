@@ -104,9 +104,7 @@ class FauxProvider:
         )
         return text
 
-    def stream(
-        self, prompt: str, *, context: Any = None, state: Any = None
-    ) -> Iterator[str]:
+    def stream(self, prompt: str, *, context: Any = None, state: Any = None) -> Iterator[str]:
         """Consume one step and yield its reply as chunks.
 
         With ``tokens_per_second`` unset, yields the whole reply as a single chunk.

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from goal_persistence.models import Goal, GoalStatus, TransitionError, Usage
+from goal_persistence.models import Goal, GoalStatus, Usage
 
 
 SCHEMA = """
@@ -166,9 +166,7 @@ class GoalStore:
 
     def delete(self, thread_id: str) -> bool:
         with self._connect() as conn:
-            cur = conn.execute(
-                "DELETE FROM thread_goals WHERE thread_id = ?", (thread_id,)
-            )
+            cur = conn.execute("DELETE FROM thread_goals WHERE thread_id = ?", (thread_id,))
             conn.commit()
             return cur.rowcount > 0
 

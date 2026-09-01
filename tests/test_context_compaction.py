@@ -43,9 +43,7 @@ def test_archive_is_json_and_roundtrips(tmp_path: Path) -> None:
     import json
 
     compactor = ContextCompactor(threshold=0)
-    result = compactor.compact(
-        [item("x", "unmarked", source="tool")], tmp_path, "archive.json"
-    )
+    result = compactor.compact([item("x", "unmarked", source="tool")], tmp_path, "archive.json")
     data = json.loads(Path(result.archive_path).read_text(encoding="utf-8"))
     assert data["items"][0]["id"] == "x"
     assert data["items"][0]["source"] == "tool"
@@ -94,17 +92,23 @@ def test_window_80_percent_triggers_compaction(tmp_path: Path) -> None:
         item("a", "x" * 81, important=True),
         item("b", "unmarked"),
     ]
-    result = compactor.compact_window(over, window_size=100, archive_dir=tmp_path, archive_name="a.json")
+    result = compactor.compact_window(
+        over, window_size=100, archive_dir=tmp_path, archive_name="a.json"
+    )
     assert result.compact_occurred
 
     under = [item("a", "x" * 79, important=True)]
-    result_under = compactor.compact_window(under, window_size=100, archive_dir=tmp_path, archive_name="b.json")
+    result_under = compactor.compact_window(
+        under, window_size=100, archive_dir=tmp_path, archive_name="b.json"
+    )
     assert not result_under.compact_occurred
 
 
 def test_window_rejects_nonpositive(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        ContextCompactor(threshold=0).compact_window([], window_size=0, archive_dir=tmp_path, archive_name="x")
+        ContextCompactor(threshold=0).compact_window(
+            [], window_size=0, archive_dir=tmp_path, archive_name="x"
+        )
 
 
 def test_reduction_ratio_holds_as_window_grows(tmp_path: Path) -> None:
@@ -115,9 +119,7 @@ def test_reduction_ratio_holds_as_window_grows(tmp_path: Path) -> None:
     ratios = []
     for n_noise in (10, 100, 500):
         items = [item(f"imp-{i}", f"CRITICAL {i}", important=True) for i in range(10)]
-        items += [
-            item(f"noise-{i}", f"verbose line {i} " * 20) for i in range(n_noise)
-        ]
+        items += [item(f"noise-{i}", f"verbose line {i} " * 20) for i in range(n_noise)]
         total = sum(len(i.content) for i in items)
         result = compactor.compact_window(
             items, window_size=total, archive_dir=tmp_path, archive_name=f"sweep-{n_noise}.json"

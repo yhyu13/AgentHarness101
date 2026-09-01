@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from faux_provider import FauxMaker, FauxProvider
 from goal_loop import (
@@ -28,7 +28,7 @@ from goal_loop import (
     Verdict,
 )
 from goal_loop.world_verifier import WorldCheck, WorldVerifier
-from goal_persistence import GoalRuntime, GoalStatus, GoalStore
+from goal_persistence import GoalRuntime, GoalStore
 from hippocampus import Hippocampus, HippocampusStore
 from observability import TraceLog
 from sandbox import Sandbox
@@ -113,7 +113,9 @@ def _run(
             print(f"  @verify           : {v.command} -> exit {v.returncode}{extra}")
         wv = world.verify(artifact, expected=EXPECTED)
         verdict = "OK" if wv.ok else "FAIL"
-        print(f"  world verifier    : observed {wv.observed!r} vs expected {wv.expected!r} -> {verdict}")
+        print(
+            f"  world verifier    : observed {wv.observed!r} vs expected {wv.expected!r} -> {verdict}"
+        )
         if not wv.ok:
             print(f"      what: {wv.what}")
             print(f"      why : {wv.why}")
@@ -145,9 +147,7 @@ def main() -> None:
     _run(
         "Scenario 1 - happy path (correct artifact, real @verify, world OK)",
         happy_dir,
-        maker=FauxMaker(
-            FauxProvider(["wrote hello world"]), modified_files=[str(happy_artifact)]
-        ),
+        maker=FauxMaker(FauxProvider(["wrote hello world"]), modified_files=[str(happy_artifact)]),
         checker=StaticChecker(Verdict.PASS),
         world=WorldVerifier([WorldCheck(happy_artifact, expected=EXPECTED)]),
         verify_command=_verify_command(happy_artifact, EXPECTED),

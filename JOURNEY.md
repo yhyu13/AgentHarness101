@@ -261,6 +261,38 @@
 
 ---
 
+---
+
+### Era 31 — src 布局迁移 + crashed-maker 兜底落定
+
+| ME | YOU |
+|---|---|
+| （没纠正。） | 把 11 个 harness 包从仓库根平铺迁到 `src/` 布局（`pyproject` 加 `pythonpath=["src"]`、覆盖率 `source=["src"]`），测试 `test_goal_loop.py` 断言从 `"goal_loop"` 改成 `"src"`。全量 **140 passed**。同时核对 STATUS「Next phase」里那条遗留的「crashed maker 兜底决策」——代码里早已 fail-closed（`loop_runner.run` 捕获 maker/checker 异常 → `ok=False` / `FAIL`，goal 停 `active` 不误判 complete），红队 Era 29 已用测试钉住，这条不是待办，是过时的状态。 |
+
+关键决策：crashed-maker 兜底「维持现状 + 测试钉住」这条分支里，兜底早已实现（`loop_runner.py:210-219`），只是 STATUS 没同步。真正剩下的硬目标是 harness_skills.md 里的 **目标 2（无人值守调度）** 和 **目标 3（多代理编排）**。
+
+---
+
+---
+
+### Era 32 — 100 任务路线图 + 目标 2/3（无人值守调度 + 多代理编排）
+
+| ME | YOU |
+|---|---|
+| 「1 做了什么并更新 journey / 2 待办是什么 / 3 规划 100 任务 P0→P2 dump 到 doc / 4 审 plan doc / 5 只执行 P0，不提问，全程走 superpowers」 | 先核对现状：src 布局迁移已落地（140 passed），crashed-maker 兜底早已 fail-closed（`loop_runner.py:210-219`，红队 Era 29 已钉）。写 `doc/roadmap/100_tasks.md`（100 条 P0/P1/P2，含自我评审四条），再 TDD 落 P0：`goal_loop/scheduler.py`（`Scheduler`：`resume_all`→串行 `run_until_terminal`→晨报，skip/errored 隔离 + `run_periodic` 注入 sleep）+ `goal_loop/orchestrator.py`（`Orchestrator`：planner→executor×N→reviewer，`make`/`check` 直接当 maker+checker 接进 loop）。全量 **140→154 passed**、覆盖率 **93.79%**，两新模块均 100%。 |
+
+关键决策：`Orchestrator.make` 的 `ok` = `无 error 且 有 output 且 all(ok)`（空 plan 判 `ok=False`，fail-closed）；`Scheduler` 用 `Runner` Protocol 而非硬绑 `GoalLoopRunner`，单元测试用 stub 隔离排序/skip/错误隔离逻辑，另有一条真 `GoalLoopRunner` 集成测试证明组合。
+
+### Era 33 — P1 加固：LLM-judge / 成本计价 / 观测 / 记账 / CI / 文档
+
+| ME | YOU |
+|---|---|
+| 「keep working non stop till all task done」 | 从 `doc/roadmap/100_tasks.md` 的 P1 接着往下做，不提问、每条都 TDD。落：`eval_harness/judge.py`（`LLMJudge` fail-closed，超时/异常/垃圾回复都判 FAIL，不误判 PASS）；`cost_control/cost.py`（`Price`/`PRICING`/`estimate_cost` 按模型计价，未知模型 `KeyError` fail-closed，价格标 illustrative 待确认）+ `cost_control/ledger.py`（`TokenLedger` 持久化 input/output/calls，跨实例累加不丢，`report` 可读）；`observability/trace.py`（`span` 上下文管理器记 `duration_ms`，异常也落盘）。对抗边界补 `test_resume_all_is_idempotent` / `test_goal_state_does_not_cross_contaminate`（多 goal 状态不串扰、重复 resume 不重复跑）。CI：`scripts/check.sh` 扩成 fmt+lint+test+coverage 四闸，`pyproject.toml` 加 ruff 配置（line-length 100、lint E4/E7/E9/F），全仓 `ruff format` + `ruff check --fix` 清空 34 条 lint。文档补齐 `doc/08_scheduler`、`doc/09_orchestrator` 的 plan+journey。全量 **154→170 passed**、覆盖率 **93.71%** ≥ 92。 |
+
+关键决策：`LLMJudge` 超时用 daemon 线程 + `join(timeout)` 兜底（fail-closed 不误判 PASS）；`TokenLedger.estimated_cost` 委托 `estimate_cost`，不另写一套计价；`TokenLedger.record` 用 `input_tokens`/`output_tokens` 诚实记账，跨会话 `_load`/`_save` JSON 累加。CI 里 `check.sh` 的 ruff 是「先 format 再 lint 再 test」，顺序固定；`E731`（lambda 赋名）与 examples 的 `E402`（load_dotenv 必须先于 anthropic import）走 per-file-ignores，不硬改语义。
+
+---
+
 ## 这个项目怎么教 vibe coding
 
 ### 人的工作

@@ -54,9 +54,7 @@ class SelfImprover:
             evidence=summary,
             source="self-improve",
         )
-        self._hippocampus.learn(
-            fact.key, fact.value, correct=fact.correct, evidence=fact.evidence
-        )
+        self._hippocampus.learn(fact.key, fact.value, correct=fact.correct, evidence=fact.evidence)
         return fact
 
     # ------------------------------------------------------------------ retrieve

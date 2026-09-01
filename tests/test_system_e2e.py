@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from faux_provider import FauxMaker, FauxProvider
 from goal_loop import (

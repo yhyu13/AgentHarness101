@@ -204,9 +204,7 @@ class GoalLoopRunner:
                 if extra:
                     steering = steering + "\n\n" + extra
             try:
-                maker_output: MakerOutput = self._maker(
-                    self._spec, self._state, steering
-                )
+                maker_output: MakerOutput = self._maker(self._spec, self._state, steering)
             except Exception as exc:  # fail closed: a crashed maker is no-progress, never a crash
                 maker_output = MakerOutput(
                     summary=f"maker crashed: {type(exc).__name__}: {exc}",
@@ -215,7 +213,7 @@ class GoalLoopRunner:
             maker_succeeded = maker_output.ok
             try:
                 checker_output: CheckerOutput = self._checker(self._spec, maker_output)
-            except Exception as exc:  # fail closed: a crashed checker is a FAIL verdict, never a crash
+            except Exception:  # fail closed: a crashed checker is a FAIL verdict, never a crash
                 checker_output = CheckerOutput(verdict=Verdict.FAIL, tokens_used=0)
 
             if self._trace_log is not None:
@@ -233,11 +231,7 @@ class GoalLoopRunner:
                     for c in f"{thread_id}-round-{round_number}"
                 )
                 traj = self._hippocampus.start_trajectory(traj_id)
-                important = (
-                    checker_output.issues[0].description
-                    if checker_output.issues
-                    else ""
-                )
+                important = checker_output.issues[0].description if checker_output.issues else ""
                 self._hippocampus.record_step(
                     traj,
                     "make",
@@ -320,9 +314,7 @@ class GoalLoopRunner:
             # checker says PASS.
             all_satisfied = len(criteria_satisfied) == len(self._spec.acceptance_criteria)
             verdict_ok = checker_output.verdict in (Verdict.PASS, Verdict.ACCEPT_WITH_MINOR)
-            world_ok = (
-                self._world_verifier.verify_all().ok if self._world_verifier else True
-            )
+            world_ok = self._world_verifier.verify_all().ok if self._world_verifier else True
             if all_satisfied and verdict_ok and maker_succeeded and world_ok:
                 evidence = self._build_evidence(criteria_satisfied, results, checker_output)
                 goal = self._runtime.mark_complete(thread_id, evidence)

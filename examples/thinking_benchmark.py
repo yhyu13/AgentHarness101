@@ -21,7 +21,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import anthropic
@@ -76,7 +76,7 @@ def stats(samples: list[float]) -> dict:
         return {"n": 0, "mean": None, "variance": None, "stddev": None}
     mean = sum(samples) / n
     variance = sum((x - mean) ** 2 for x in samples) / n
-    return {"n": n, "mean": mean, "variance": variance, "stddev": variance ** 0.5}
+    return {"n": n, "mean": mean, "variance": variance, "stddev": variance**0.5}
 
 
 def compare(off_stats: dict, on_stats: dict, metric: str) -> dict:
@@ -84,8 +84,13 @@ def compare(off_stats: dict, on_stats: dict, metric: str) -> dict:
     off = off_stats["mean"]
     on = on_stats["mean"]
     if off is None or on is None:
-        return {"metric": metric, "off_mean": None, "on_mean": None,
-                "delta": None, "delta_pct": None}
+        return {
+            "metric": metric,
+            "off_mean": None,
+            "on_mean": None,
+            "delta": None,
+            "delta_pct": None,
+        }
     delta = off - on
     delta_pct = (delta / on * 100) if on else 0.0
     return {

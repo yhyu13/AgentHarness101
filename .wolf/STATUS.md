@@ -1,7 +1,7 @@
 # STATUS — TDD 对比 + 三目标实现
 
 > Single source of truth for resuming work. Read this FIRST when starting a session.
-> Last updated: 2026-08-30
+> Last updated: 2026-09-01
 
 ---
 
@@ -17,21 +17,22 @@
 - **全量验证**：`python3 -m pytest -q` → **116 passed**；覆盖率 **92.57% ≥ 92**。
 - **收口**：`faux_provider/provider.py:121-124` 判为**行为**（`stream()` 分块语义）→ 补确定性测试（monkeypatch `time.sleep`），`faux_provider/provider.py` 覆盖率 100%；README 补 `faux_provider/`、`world_verifier.py`、`scripts/check.sh`+测试纪律 + 测试总数 79→126；JOURNEY/`doc/04_faux_provider/journey.md` 风险条目勾掉。全量 **126 passed**、覆盖率 **93.11% ≥ 92**。
 - **harness skills 调研 → 自我改进闭环（目标 7）**：`doc/reference_harness/harness_skills.md` 把 `AGENTS_REPO.md` 的 100+ 仓库蒸馏成「五台阶 + 三条横切规律 + 三个新目标」；实现目标 1（§5 自我改进）`goal_loop/self_improver.py`（`SelfImprover`：run 结果→`repeat`/`avoid` 教训→下次注入 steering）+ `Hippocampus.facts()` + `GoalLoopRunner` 可选 `self_improver` 参数 fail-open。13 新测试，全量 **126→139 passed**、覆盖率 **93.33%**，`self_improver.py` 100%。
+- **src 布局迁移 + 100 任务路线图 + 目标 2/3（无人值守调度 + 多代理编排）**：`doc/roadmap/100_tasks.md`（100 条 P0/P1/P2 + 自我评审）；`goal_loop/scheduler.py`（`Scheduler`：`resume_all`→串行 `run_until_terminal`→晨报，skip/errored 隔离 + `run_periodic` 注入 sleep）+ `goal_loop/orchestrator.py`（`Orchestrator`：planner→executor×N→reviewer，`make`/`check` 接 loop）。全量 **140→154 passed**、覆盖率 **93.79%**，两新模块均 100%。crashed-maker 兜底核实为早已 fail-closed（`loop_runner.py:210-219`），无需新代码。
+- **P1 加固（Era 33）**：`eval_harness/judge.py`（`LLMJudge` fail-closed，超时/异常/垃圾回复判 FAIL）；`cost_control/cost.py`（`Price`/`PRICING`/`estimate_cost` 按模型计价，未知模型 KeyError）+ `cost_control/ledger.py`（`TokenLedger` 持久化 input/output/calls）；`observability/trace.py`（`span` 记 `duration_ms`）；对抗补 `resume_all` 幂等 + 多 goal 状态隔离；`sandbox/path_policy.py`（`PathPolicy` 文件写白名单，`..` 穿越 fail-closed，seccomp/network 属 OS-gated）；CI `check.sh` 扩 fmt+lint+test+coverage 四闸 + `pyproject.toml` 加 ruff（line-length 100、E4/E7/E9/F）清空 34 条 lint；`doc/08_scheduler`/`doc/09_orchestrator` plan+journey 补齐；覆盖率补到 **97.18%**（目标 95%）。全量 **154→206 passed**。
 
 ---
 
 ## 🚀 Next phase
 
-**Goal:** 三条并行的候选（挑一条，其余留 backlog）。
+**Goal:** P0 + P1 已收口（`doc/roadmap/100_tasks.md` 1–46），剩 P2（47–100）与两条待确认。
 
-1. **crashed maker 兜底决策**（遗留，本轮未动）——`run()` 是否兜底捕获 maker 异常，或维持现状（goal 停 `active`、不误判 complete）并用测试钉住。
-2. **目标 2：无人值守调度（§3）**——`goal_loop/scheduler.py`：定时重臂 active goals、串行跑、收尾晨报。落点组合 `goal_persistence.resume_all` + `run_until_terminal`。
-3. **目标 3：多代理编排（§4）**——`goal_loop/orchestrator.py`：编排器把 goal 拆给 N 个专职子代理（planner/executor/reviewer）。
+P1 已落定（Era 33）：LLM-judge、按模型计价、token 账本、trace span、CI 四闸、沙箱文件写隔离、`doc/08`/`doc/09`、覆盖率 97.18%、206 passed。
 
-### Open decisions
-- crashed-maker 兜底本身即待定项。
-- 真 LLM 基线要 key，`doc/04_faux_provider/benchmark.md` 标 `待确认`，拿 key 后补。
-- 目标 2/3 各需 `doc/08_*`、`doc/09_*` plan doc（沿用 harness_skills.md 的目标拆分）。
+### Open decisions / 待确认
+- **真 LLM 基线（P1.15–17 / 41–44）**：✅ 已跑通（2026-09-01）。修 `examples/llm_goal_loop.py` 三处（thinking block 提取、key 顺序对齐 env 三件套、token 记账 `input+output`），`deepseek/deepseek-v4-pro` 经 `llm-proxy.tapsvc.com` 跑出 **complete / 1 轮 / 185 token / 平均 6.21s**，机器 checker `answer()==42` PASS。真数字见 `doc/04_faux_provider/benchmark.md`。
+- **seccomp/Landlock / network / fork 隔离（P1.18 / 20）**：Linux-only syscall 特性，Windows 降级到 `PathPolicy`（纯 pathlib 文件写隔离已落地）。要真隔离需 Linux 环境。
+- **mypy 8 错误（P2.78/92）**：`src` 下 8 处类型错误（`sandbox/verifier` 的 `bytes|str`、`world_verifier` 的 `str|None in`、`models` 的 `datetime|None`、`loop_runner:184` 的 `int>=None`），多为 Optional 注解过宽，非运行时 bug（有真值守卫）。要 `py.typed`+CI 需先修。
+- **P2（47–100）**：文档深水区、property-based/fuzz 测试、可观测导出、打包 wheel/Docker、生态整合、打磨重构——大部分独立可选，未启动。
 
 ---
 
@@ -45,14 +46,14 @@
 
 ## ⚠️ External blockers (don't block coding)
 
-- `examples/llm_goal_loop.py` 真 LLM 基线要 `MINIMAX_API_KEY`，无 key 时 benchmark 标 `待确认`，不编数字。
+- `examples/llm_goal_loop.py` 真 LLM 基线：key 在，但 model/base_url/key 三件套不一致（deepseek-v4-pro env vs MiniMax 示例假设）。对齐后重跑，否则 benchmark 标 `待确认`，不编数字。
 
 ---
 
 ## 🔧 Useful commands
 
 ```bash
-python3 -m pytest -q                                # 全量测试（139 passed）
+python3 -m pytest -q                                # 全量测试（206 passed）
 python3 -m pytest --cov --cov-report=term-missing -q  # 覆盖率闸门（fail_under=92）
 python3 -m pytest tests/test_faux_provider.py -q    # 单目标测试
 python3 examples/system_e2e_trace.py                # 全系统 E2E 每轮对话 trace（happy + 对抗）

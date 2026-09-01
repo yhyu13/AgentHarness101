@@ -62,6 +62,8 @@ curriculum.
 | `faux_provider/` | Deterministic scripted LLM (`FauxProvider` + `FauxMaker`): replaces only "what the LLM says" | Target 2 |
 | `goal_loop/world_verifier.py` | `WorldVerifier`: machine re-reads produced artifacts, does not trust maker/checker self-report | Target 3 |
 | `goal_loop/self_improver.py` | `SelfImprover`: distills a run's outcome into a durable lesson and re-injects relevant lessons on the next run | Target 7 |
+| `goal_loop/scheduler.py` | `Scheduler`: re-arms active goals, runs each serially to terminal, renders a morning report | Target 8 |
+| `goal_loop/orchestrator.py` | `Orchestrator`: splits a goal among planner/executor/reviewer sub-agents, plugs in as maker+checker | Target 9 |
 
 `goal_loop` also ships `registered_roles.py`, which routes the maker/checker through a
 `ToolRegistry` permission gate — so the last "parallel toys" gap (loop → tool registry)
@@ -161,13 +163,13 @@ uv pip install -e ".[dev]"
 
 ```bash
 python3 -m pytest -q                 # full suite
-scripts/check.sh                     # coverage gate: fail_under=92 + term-missing
+scripts/check.sh                     # gate: format + lint + test + coverage
 ```
 
-139 tests total across 11 modules. The coverage gate (`fail_under=92`, see
+170 tests total across 11 modules. The coverage gate (`fail_under=92`, see
 `[tool.coverage]` in `pyproject.toml`) enforces that uncovered lines are either dead
 code (delete them) or missing behavior (add a test) — never pad tests to hit the
-number. Current total coverage: 93.33%.
+number. Current total coverage: 93.71%.
 
 ## Goal loop usage
 

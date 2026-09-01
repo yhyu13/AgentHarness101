@@ -69,9 +69,7 @@ class TestWorldVerifier:
         result = WorldVerifier().verify(artifact, contains="TARGET")
         assert result.ok
 
-    def test_verify_keyword_miss_reports_observed_vs_expected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_verify_keyword_miss_reports_observed_vs_expected(self, tmp_path: Path) -> None:
         artifact = tmp_path / "artifact.txt"
         artifact.write_text("wrong content", encoding="utf-8")
         result = WorldVerifier().verify(artifact, contains="TARGET")

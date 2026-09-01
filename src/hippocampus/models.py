@@ -83,9 +83,7 @@ class Trajectory:
             task_id=data["task_id"],
             started_at=datetime.fromisoformat(data["started_at"]),
             finished_at=(
-                datetime.fromisoformat(data["finished_at"])
-                if data.get("finished_at")
-                else None
+                datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None
             ),
         )
         traj.steps = [TrajectoryStep.from_dict(s) for s in data.get("steps", [])]

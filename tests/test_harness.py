@@ -28,7 +28,7 @@ def runtime(store: GoalStore) -> GoalRuntime:
 
 class TestStatusMachine:
     def test_active_can_transition_to_all_non_terminal(self, store: GoalStore) -> None:
-        goal = store.create(Goal(thread_id="t1", objective="o"))
+        store.create(Goal(thread_id="t1", objective="o"))
         for status in (
             GoalStatus.PAUSED,
             GoalStatus.BLOCKED,
@@ -94,7 +94,7 @@ class TestAccounting:
 
     def test_time_budget_auto_transition(self, runtime: GoalRuntime) -> None:
         runtime.create_goal("t1", "o", budget_wall_ms=1)
-        acc = runtime.start_turn("t1")
+        runtime.start_turn("t1")
         # Force some wall time to elapse.
         import time
 
@@ -191,9 +191,7 @@ class TestCompletionAudit:
 class TestLifecycleEvents:
     def test_full_manual_lifecycle(self, runtime: GoalRuntime) -> None:
         # 1. Create an active goal.
-        runtime.create_goal(
-            "t1", "Build a goal persistence harness", budget_tokens=1000
-        )
+        runtime.create_goal("t1", "Build a goal persistence harness", budget_tokens=1000)
 
         # 2. Idle self-start produces a continuation steering prompt.
         cont = runtime.maybe_continue("t1")

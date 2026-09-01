@@ -53,7 +53,5 @@ class ExtractiveSummarizer(Summarizer):
             lines.append(f"- [{item.source or item.id}] {first}")
 
         body = "\n".join(lines) if lines else "(no excerpt)"
-        summary = (
-            f"Archived {len(material)} item(s). Keywords: {terms}.\n{body}"
-        )
+        summary = f"Archived {len(material)} item(s). Keywords: {terms}.\n{body}"
         return summary[: self._max_chars]

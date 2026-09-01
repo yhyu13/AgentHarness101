@@ -69,17 +69,13 @@ class TestSelfImprover:
         assert "[avoid]" in fact.value
         assert "command failed" in fact.value
 
-    def test_relevant_lessons_matches_overlapping_objective(
-        self, hippocampus: Hippocampus
-    ) -> None:
+    def test_relevant_lessons_matches_overlapping_objective(self, hippocampus: Hippocampus) -> None:
         improver = SelfImprover(hippocampus)
         improver.distill("t1", _objective(), "complete", "iterative worked")
         matches = improver.relevant_lessons(_objective())
         assert any("[repeat]" in m.value for m in matches)
 
-    def test_relevant_lessons_ignores_unrelated_objective(
-        self, hippocampus: Hippocampus
-    ) -> None:
+    def test_relevant_lessons_ignores_unrelated_objective(self, hippocampus: Hippocampus) -> None:
         improver = SelfImprover(hippocampus)
         improver.distill("t1", _objective(), "complete", "iterative worked")
         assert improver.relevant_lessons("build a web server with sockets") == []
@@ -92,14 +88,10 @@ class TestSelfImprover:
         assert improver.relevant_lessons("") == []
         assert improver.relevant_lessons("a b") == []  # no content words (len >= 3)
 
-    def test_steering_context_empty_without_lessons(
-        self, hippocampus: Hippocampus
-    ) -> None:
+    def test_steering_context_empty_without_lessons(self, hippocampus: Hippocampus) -> None:
         assert SelfImprover(hippocampus).steering_context(_objective()) == ""
 
-    def test_steering_context_renders_prior_lessons(
-        self, hippocampus: Hippocampus
-    ) -> None:
+    def test_steering_context_renders_prior_lessons(self, hippocampus: Hippocampus) -> None:
         improver = SelfImprover(hippocampus)
         improver.distill("t1", _objective(), "blocked", "no progress", ["crashed"])
         ctx = improver.steering_context(_objective())

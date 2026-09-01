@@ -149,9 +149,7 @@ class TestFauxResponseFactory:
 
 
 class TestDeterminism:
-    def test_scripted_output_is_byte_identical_across_ten_runs(
-        self, tmp_path: Path
-    ) -> None:
+    def test_scripted_output_is_byte_identical_across_ten_runs(self, tmp_path: Path) -> None:
         def run_once(i: int) -> str:
             runtime = GoalRuntime(GoalStore(tmp_path / f"db{i}.db"))
             provider = FauxProvider(["done"])
@@ -172,9 +170,7 @@ class TestDeterminism:
 
 
 class TestComposition:
-    def test_loop_completes_with_scripted_reply(
-        self, runtime: GoalRuntime, tmp_path: Path
-    ) -> None:
+    def test_loop_completes_with_scripted_reply(self, runtime: GoalRuntime, tmp_path: Path) -> None:
         provider = FauxProvider(["implemented the feature"])
         maker = FauxMaker(provider)
         runner = GoalLoopRunner(

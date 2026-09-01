@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import anthropic
 
@@ -34,7 +34,10 @@ from goal_persistence import GoalRuntime, GoalStatus, GoalStore
 
 MODEL = os.environ.get("ANTHROPIC_MODEL", "MiniMax-M3")
 BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.minimaxi.com/anthropic")
-API_KEY = os.environ.get("MINIMAX_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+# MODEL/BASE_URL/AUTH_TOKEN come from the ANTHROPIC_* env triplet; keep the key
+# aligned to the same triplet (the llm-proxy endpoint) instead of preferring the
+# legacy MiniMax key.
+API_KEY = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("MINIMAX_API_KEY")
 
 
 class LlmMaker:
@@ -58,12 +61,17 @@ class LlmMaker:
             system=steering,
             messages=[{"role": "user", "content": prompt}],
         )
-        code = response.content[0].text
+        # Thinking models return a ThinkingBlock before the TextBlock; pull the
+        # text block only (skip .thinking) so `code` holds the actual answer.
+        code = "".join(b.text for b in response.content if b.type == "text")
         # Keep only the def block; ignore any extra prose.
         start = code.find("def answer")
         if start != -1:
             self._artifact.write_text(code[start:].strip(), encoding="utf-8")
-        tokens = (response.usage.input_tokens - (response.usage.cache_read_input_tokens or 0)) + response.usage.output_tokens
+        # Total usage = input + output. Do NOT subtract cache_read_input_tokens:
+        # the proxy reports them as separate, non-overlapping buckets, so
+        # subtracting drives the total negative on cache hits.
+        tokens = response.usage.input_tokens + response.usage.output_tokens
         return MakerOutput(
             summary=f"LLM wrote artifact ({len(code)} chars)",
             modified_files=[str(self._artifact)] if self._artifact.exists() else [],

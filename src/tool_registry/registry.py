@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from tool_registry.models import Permission, ToolRegistration, ToolResult, ToolSpec
@@ -40,10 +39,7 @@ class ToolRegistry:
         if reg.spec.permission not in self._enabled.get(name, set()):
             return ToolResult(
                 ok=False,
-                error=(
-                    f"permission {reg.spec.permission.value} not enabled for "
-                    f"tool {name}"
-                ),
+                error=(f"permission {reg.spec.permission.value} not enabled for tool {name}"),
             )
 
         validation_error = self._validate(reg.spec.parameters_schema, parameters)

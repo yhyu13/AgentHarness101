@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,20 @@ class TraceLog:
 
     def messages(self, event_type: str) -> list[Any]:
         return [e.payload for e in self.replay() if e.event_type == event_type]
+
+    @contextmanager
+    def span(self, event_type: str, **payload: Any) -> Iterator[None]:
+        """Record the wall-clock duration of a code block as one trace event.
+
+        The event is appended once on exit (even on exception), with a ``duration_ms``
+        field measured in milliseconds. Extra keyword args ride along in the payload.
+        """
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            payload["duration_ms"] = round((time.perf_counter() - start) * 1000, 3)
+            self.append(event_type, payload)
 
     def _read_next_seq(self) -> int:
         events = self.replay()

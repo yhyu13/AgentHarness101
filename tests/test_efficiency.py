@@ -1,12 +1,11 @@
 """Smoke test for the efficiency measurement: real, non-degenerate numbers."""
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 
-def _load_measure() -> "module":
+def _load_measure():
     path = Path(__file__).parent.parent / "examples" / "measure_efficiency.py"
     spec = importlib.util.spec_from_file_location("measure_efficiency", path)
     module = importlib.util.module_from_spec(spec)

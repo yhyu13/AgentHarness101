@@ -8,7 +8,7 @@ handler runs.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 from goal_loop.models import CheckerOutput, GoalSpec, LoopState, MakerOutput
 from tool_registry import Permission, ToolRegistry, ToolResult, ToolSpec
@@ -41,9 +41,7 @@ class RegisteredMaker:
         registry.enable(tool_name, Permission.WRITE)
 
     def __call__(self, spec: GoalSpec, state: LoopState, steering: str) -> MakerOutput:
-        result: ToolResult = self._registry.call(
-            self._tool_name, {"objective": spec.objective}
-        )
+        result: ToolResult = self._registry.call(self._tool_name, {"objective": spec.objective})
         if not result.ok:
             return MakerOutput(
                 summary=f"maker tool blocked: {result.error}",
@@ -80,13 +78,9 @@ class RegisteredChecker:
         registry.enable(tool_name, Permission.READ)
 
     def __call__(self, spec: GoalSpec, output: MakerOutput) -> CheckerOutput:
-        result: ToolResult = self._registry.call(
-            self._tool_name, {"summary": output.summary}
-        )
+        result: ToolResult = self._registry.call(self._tool_name, {"summary": output.summary})
         if not result.ok:
             from goal_loop.models import Verdict
 
-            return CheckerOutput(
-                verdict=Verdict.FAIL, tokens_used=0
-            )
+            return CheckerOutput(verdict=Verdict.FAIL, tokens_used=0)
         return result.output

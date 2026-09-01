@@ -14,6 +14,7 @@
 | 04:5x | 红蓝对抗：红队 4 攻击先红，蓝队修 loop_runner fail-closed + safety HIGH_RISK/注入变体 | tests/test_red_team.py, goal_loop/loop_runner.py, safety/safety.py, .wolf/buglog.json | 4 攻击转绿，116 passed | 中 |
 | 09:0x | thinking benchmark：量化测试（关=省略参数/开=adaptive/stats 均值方差）+ 脚本；无 key 真实验待确认 | tests/test_thinking_benchmark.py, examples/thinking_benchmark.py | 5 passed，121 passed 全绿 | 中 |
 | 23:1x | 自我改进闭环（目标7）：harness_skills 调研蒸馏 → SelfImprover(distill/relevant_lessons/steering_context) + Hippocampus.facts() + loop_runner 可选接线 | goal_loop/self_improver.py, hippocampus/memory.py, goal_loop/loop_runner.py, tests/test_self_improver.py, doc/07_self_improve/*, doc/reference_harness/harness_skills.md | 139 passed / 覆盖 93.33% / self_improver 100% | 中 |
+| 00:42 | 100 任务路线图 + P0 目标2/3（无人值守调度 Scheduler + 多代理编排 Orchestrator）：先核对 crashed-maker 早已 fail-closed，写 doc/roadmap/100_tasks.md，再 TDD 落 scheduler.py/orchestrator.py | goal_loop/scheduler.py, goal_loop/orchestrator.py, goal_loop/__init__.py, tests/test_scheduler.py, tests/test_orchestrator.py, doc/roadmap/100_tasks.md, JOURNEY.md, README.md, .wolf/STATUS.md, .wolf/cerebrum.md | 154 passed / 覆盖 93.79% / 两新模块 100% | 中 |
 
 ## Session: 2026-08-29 21:52
 
@@ -123,3 +124,70 @@
 | 11:38 | Edited tests/test_coverage_gate.py | modified test_coverage_run_has_source_branch_omit() | ~187 |
 | 11:40 | Edited tests/test_goal_loop.py | "goal_loop" → "src" | ~28 |
 | 11:41 | Session end: 7 writes across 5 files (CLAUDE.md, .gitignore, pyproject.toml, test_coverage_gate.py, test_goal_loop.py) | 8 reads | ~12185 tok |
+| 11:45 | Session end: 7 writes across 5 files (CLAUDE.md, .gitignore, pyproject.toml, test_coverage_gate.py, test_goal_loop.py) | 8 reads | ~12185 tok |
+
+## Session: 2026-08-31 00:06
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-08-31 00:20
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 00:27 | Edited JOURNEY.md | expanded (+12 lines) | ~166 |
+| 00:29 | Created doc/roadmap/100_tasks.md | — | ~1976 |
+| 00:29 | Edited doc/roadmap/100_tasks.md | inline fix | ~37 |
+| 00:29 | Edited doc/roadmap/100_tasks.md | expanded (+14 lines) | ~280 |
+| 00:32 | Created tests/test_scheduler.py | — | ~1490 |
+| 00:33 | Created tests/test_orchestrator.py | — | ~1119 |
+| 00:33 | Created src/goal_loop/scheduler.py | — | ~1252 |
+| 00:33 | Created src/goal_loop/orchestrator.py | — | ~767 |
+| 00:34 | Edited src/goal_loop/__init__.py | added 2 import(s) | ~100 |
+| 00:34 | Edited src/goal_loop/__init__.py | 5→9 lines | ~46 |
+| 00:36 | Edited tests/test_scheduler.py | modified test_active_goals_returns_continuations() | ~98 |
+| 00:39 | Edited README.md | 1→3 lines | ~116 |
+| 00:39 | Edited README.md | 139 → 154 | ~20 |
+| 00:39 | Edited JOURNEY.md | expanded (+12 lines) | ~235 |
+| 00:40 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
+| 00:41 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
+| 00:41 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
+| 00:42 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
+| 00:44 | Edited src/eval_harness/judge.py | added 1 import(s) | ~50 |
+| 00:45 | Edited src/eval_harness/judge.py | modified __init__() | ~623 |
+| 00:45 | Edited src/eval_harness/__init__.py | 12→13 lines | ~84 |
+| 00:45 | Edited src/cost_control/cost.py | modified estimate_cost() | ~332 |
+| 00:45 | Edited src/cost_control/__init__.py | expanded (+7 lines) | ~64 |
+| 00:46 | Edited src/observability/trace.py | added 2 import(s) | ~60 |
+| 00:46 | Edited src/observability/trace.py | modified messages() | ~212 |
+| 00:46 | Created tests/test_p1_hardening.py | — | ~801 |
+| 00:47 | Created src/cost_control/ledger.py | — | ~588 |
+| 00:48 | Edited src/cost_control/__init__.py | added 1 import(s) | ~82 |
+| 00:48 | Edited tests/test_p1_hardening.py | 3→3 lines | ~40 |
+| 00:48 | Edited tests/test_p1_hardening.py | modified test_span_appends_even_on_exception() | ~460 |
+| 00:51 | Edited tests/test_adversarial_boundaries.py | modified test_goal_state_does_not_cross_contaminate() | ~438 |
+| 00:52 | Edited pyproject.toml | expanded (+14 lines) | ~113 |
+| 00:52 | Edited tests/test_harness.py | 2→2 lines | ~22 |
+| 00:52 | Edited tests/test_adversarial_boundaries.py | 6→6 lines | ~93 |
+| 00:52 | Edited tests/test_harness.py | 2→2 lines | ~24 |
+| 00:53 | Edited tests/test_efficiency.py | inline fix | ~6 |
+| 00:53 | Created scripts/check.sh | — | ~76 |
+| 00:54 | Edited tests/test_goal_loop.py | modified test_accepts_argv_list() | ~163 |
+| 00:56 | Created doc/08_scheduler/plan.md | — | ~836 |
+| 00:56 | Created doc/08_scheduler/journey.md | — | ~592 |
+| 00:57 | Created doc/09_orchestrator/plan.md | — | ~850 |
+| 00:57 | Created doc/09_orchestrator/journey.md | — | ~583 |
+| 00:58 | Edited README.md | 9→9 lines | ~112 |
+| 00:58 | Edited JOURNEY.md | expanded (+8 lines) | ~396 |
+| 00:59 | Created tests/test_path_policy.py | — | ~497 |
+| 00:59 | Created src/sandbox/path_policy.py | — | ~375 |
+| 00:59 | Edited src/sandbox/__init__.py | added 1 import(s) | ~65 |
+| 01:02 | Created tests/test_guard_branches.py | — | ~2526 |
+| 01:05 | Edited tests/test_p1_hardening.py | modified test_timeout_is_fail_closed() | ~234 |
+| 01:07 | Edited doc/04_faux_provider/benchmark.md | 5→10 lines | ~118 |
+| 01:07 | Edited examples/llm_goal_loop.py | inline fix | ~21 |
+| 01:11 | Session end: 47 writes across 26 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 44 reads | ~78272 tok |
+| 09:31 | Edited examples/llm_goal_loop.py | modified block() | ~84 |
+| 09:32 | Edited examples/llm_goal_loop.py | 3→6 lines | ~118 |
+| 09:34 | Edited examples/llm_goal_loop.py | 3→4 lines | ~84 |
+| 09:35 | Edited doc/04_faux_provider/benchmark.md | expanded (+14 lines) | ~350 |

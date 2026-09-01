@@ -33,9 +33,28 @@
 
 | 指标 | 值 |
 |---|---|
-| `examples/llm_goal_loop.py`（MiniMax，要 key） | **待确认** |
+| 模型 | `deepseek/deepseek-v4-pro`（经 `https://llm-proxy.tapsvc.com`，`ANTHROPIC_AUTH_TOKEN`） |
+| 终态 | **complete**（1 轮） |
+| 真 token 数 | **185**（首次冷缓存 565；`input+output`，随缓存波动） |
+| 墙钟 | **5.19–7.50s / 平均 6.21s**（3 次干净 run，`python3 examples/llm_goal_loop.py`） |
+| 机器 checker | `py -c ...assert m.answer() == 42` → **PASS** |
 
-没有 key，不编数字。
+跑通前提是修了三处示例里「假设过时」的地方，全在 `examples/llm_goal_loop.py`：
+
+1. **ThinkingBlock 提取**（第 66 行）：`response.content[0].text` → `"".join(b.text for b in
+   response.content if b.type == "text")`。`deepseek-v4-pro` 是 thinking 模型，`content[0]`
+   是 `ThinkingBlock`（只有 `.thinking`），直接 `.text` 抛 `AttributeError`。
+2. **key 对齐**（第 37 行）：`MINIMAX_API_KEY or ANTHROPIC_AUTH_TOKEN` → `ANTHROPIC_AUTH_TOKEN
+   or MINIMAX_API_KEY`。本机 env 的 MODEL/BASE_URL/AUTH_TOKEN 三件套已对齐到 llm-proxy，
+   但旧顺序先取 `MINIMAX_API_KEY`，用「DeepSeek 端点 + MiniMax key」跑出 0 token、三轮
+   `no progress` → BLOCKED。
+3. **token 记账**（第 71 行）：`input - cache_read + output` → `input + output`。llm-proxy
+   把 `input_tokens` 和 `cache_read_input_tokens` 报成**互不重叠**的两桶，缓存命中时相减
+   会得到负值（实测 `-97`），导致 `assert goal.usage.tokens > 0` 间歇性挂掉。
+
+结论：真 LLM 能把 harness 跑通（maker 写 `answer()==42`、机器 checker 独立裁决 PASS），
+代价是每次 run 秒级 + 不确定（token 数 185/565 漂移）。faux provider 仍不可替代——它回答
+「状态机对『LLM 说了 X』作何反应」，真 LLM 回答「真模型能不能完成任务」，两层不冲突。
 
 ## 取舍
 

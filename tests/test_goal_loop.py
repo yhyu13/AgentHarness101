@@ -16,7 +16,6 @@ from goal_loop import (
     GoalLoopRunner,
     GoalSpec,
     Issue,
-    Scope,
     Severity,
     StaticChecker,
     StopCondition,
@@ -26,7 +25,7 @@ from goal_persistence import GoalRuntime, GoalStatus, GoalStore
 from sandbox import Sandbox
 from observability import TraceLog
 from hippocampus import Hippocampus, HippocampusStore
-from tool_registry import Permission, ToolRegistry, ToolSpec
+from tool_registry import Permission, ToolRegistry
 from goal_loop.registered_roles import RegisteredChecker, RegisteredMaker
 
 
@@ -50,8 +49,7 @@ def make_spec(
         stop_conditions.append(StopCondition(kind="max_rounds", value=max_rounds))
     return GoalSpec(
         objective="Implement a goal loop",
-        acceptance_criteria=criteria
-        or [AcceptanceCriterion(id="c1", description="criterion one")],
+        acceptance_criteria=criteria or [AcceptanceCriterion(id="c1", description="criterion one")],
         stop_conditions=stop_conditions,
     )
 
@@ -140,18 +138,26 @@ class TestCommandVerifier:
         assert result.returncode == 0
 
     def test_fail(self) -> None:
-        result = CommandVerifier().run("py -c \"raise SystemExit(3)\"")
+        result = CommandVerifier().run('py -c "raise SystemExit(3)"')
         assert not result.ok
         assert result.returncode == 3
 
     def test_timeout(self) -> None:
-        result = CommandVerifier(timeout_s=1).run("py -c \"import time; time.sleep(5)\"")
+        result = CommandVerifier(timeout_s=1).run('py -c "import time; time.sleep(5)"')
         assert result.timed_out
         assert not result.ok
 
     def test_accepts_argv_list(self) -> None:
         result = CommandVerifier().run(["py", "-c", "print('ok')"])
         assert result.ok
+
+    def test_argv_list_preserves_backslash_path(self) -> None:
+        # A Windows-style path with backslashes must be forwarded verbatim as an argv
+        # list (never re-split), so the path does not drift across platforms.
+        argv = ["py", "-c", "print('ok')", r"C:\work\out.txt"]
+        result = CommandVerifier().run(argv)
+        assert result.ok
+        assert result.command == r"py -c print('ok') C:\work\out.txt"
 
 
 class TestLoopState:
@@ -203,7 +209,7 @@ class TestLoopState:
 class TestGoalLoopRunner:
     def test_completes_with_evidence(self, runtime: GoalRuntime, tmp_path: Path) -> None:
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "pass", verify_command="py -c \"pass\"")]
+            criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')]
         )
         runner = GoalLoopRunner(
             spec,
@@ -224,7 +230,11 @@ class TestGoalLoopRunner:
     ) -> None:
         spec = make_spec(
             max_rounds=2,
-            criteria=[AcceptanceCriterion("c1", "never passes", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion(
+                    "c1", "never passes", verify_command='py -c "raise SystemExit(1)"'
+                )
+            ],
         )
         runner = GoalLoopRunner(
             spec,
@@ -241,7 +251,9 @@ class TestGoalLoopRunner:
 
     def test_blocks_after_no_progress(self, runtime: GoalRuntime, tmp_path: Path) -> None:
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         runner = GoalLoopRunner(
             spec,
@@ -276,7 +288,9 @@ class TestGoalLoopRunner:
     def test_budget_auto_transition(self, tmp_db: Path, tmp_path: Path) -> None:
         runtime = GoalRuntime(GoalStore(tmp_db))
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         runner = GoalLoopRunner(
             spec,
@@ -288,9 +302,7 @@ class TestGoalLoopRunner:
         status = runner.run("t1", budget_tokens=1)
         assert status == GoalStatus.BUDGET_LIMITED
 
-    def test_resumes_from_persisted_state(
-        self, tmp_db: Path, tmp_path: Path
-    ) -> None:
+    def test_resumes_from_persisted_state(self, tmp_db: Path, tmp_path: Path) -> None:
         runtime = GoalRuntime(GoalStore(tmp_db))
         spec = make_spec(
             max_rounds=2,
@@ -300,14 +312,20 @@ class TestGoalLoopRunner:
         )
 
         first = GoalLoopRunner(
-            spec, runtime, EchoMaker("attempt 1"), StaticChecker(Verdict.FAIL),
+            spec,
+            runtime,
+            EchoMaker("attempt 1"),
+            StaticChecker(Verdict.FAIL),
             state_dir=tmp_path,
         )
         assert first.run("t1") == GoalStatus.ACTIVE  # stopped at max_rounds, still active
 
         # A fresh runner over the same store + state_dir must resume, not restart.
         second = GoalLoopRunner(
-            spec, runtime, EchoMaker("attempt 2"), StaticChecker(Verdict.PASS),
+            spec,
+            runtime,
+            EchoMaker("attempt 2"),
+            StaticChecker(Verdict.PASS),
             state_dir=tmp_path,
         )
         status = second.run("t1")
@@ -315,9 +333,7 @@ class TestGoalLoopRunner:
         # Round numbering continues from the prior run rather than resetting.
         assert second._state.current_round > 2
 
-    def test_steering_prompt_is_passed_to_maker(
-        self, runtime: GoalRuntime, tmp_path: Path
-    ) -> None:
+    def test_steering_prompt_is_passed_to_maker(self, runtime: GoalRuntime, tmp_path: Path) -> None:
         captured: dict = {}
 
         def capturing_maker(spec, state, steering):
@@ -327,7 +343,7 @@ class TestGoalLoopRunner:
             return MakerOutput(summary="done", tokens_used=5)
 
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "pass", verify_command="py -c \"pass\"")],
+            criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')],
         )
         runner = GoalLoopRunner(
             spec,
@@ -340,13 +356,13 @@ class TestGoalLoopRunner:
         assert "Implement a goal loop" in captured["steering"]
         assert "Keep the full objective intact" in captured["steering"]
 
-    def test_budget_reflects_reported_usage(
-        self, tmp_db: Path, tmp_path: Path
-    ) -> None:
+    def test_budget_reflects_reported_usage(self, tmp_db: Path, tmp_path: Path) -> None:
         runtime = GoalRuntime(GoalStore(tmp_db))
         spec = make_spec(
             max_rounds=1,
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         maker = EchoMaker("implemented")
         runner = GoalLoopRunner(
@@ -369,7 +385,9 @@ class TestGoalLoopRunner:
         # A checker that keeps saying PASS while the command keeps failing must be
         # treated as no-progress and eventually BLOCKED, not allowed to spin forever.
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         runner = GoalLoopRunner(
             spec,
@@ -394,7 +412,9 @@ class TestGoalLoopRunner:
                 return MakerOutput(summary="no progress", tokens_used=0)
 
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         runner = GoalLoopRunner(
             spec,
@@ -419,7 +439,7 @@ class TestGoalLoopRunner:
         hippo = Hippocampus(HippocampusStore(tmp_path / "memory"))
 
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "pass", verify_command="python -c \"pass\"")],
+            criteria=[AcceptanceCriterion("c1", "pass", verify_command='python -c "pass"')],
         )
         runner = GoalLoopRunner(
             spec,
@@ -450,6 +470,7 @@ class TestGoalLoopRunner:
         # A maker that writes the wrong bytes must not pass an assert-based
         # verification command. This pins the demo's fix: content, not existence.
         import sys
+
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from examples.goal_loop_demo import ArtifactChecker
 
@@ -526,7 +547,11 @@ class TestGoalLoopRunner:
 
         spec = make_spec(
             max_rounds=1,
-            criteria=[AcceptanceCriterion("c1", "must write file", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion(
+                    "c1", "must write file", verify_command='py -c "raise SystemExit(1)"'
+                )
+            ],
         )
         runner = GoalLoopRunner(spec, runtime, maker, checker, state_dir=tmp_path)
         status = runner.run("t1")
@@ -636,7 +661,9 @@ class TestGoalLoopRunner:
         # BLOCKED terminal-ish state, run_until_terminal must return it and stop, not
         # keep driving a no-progress goal forever.
         spec = make_spec(
-            criteria=[AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+            criteria=[
+                AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')
+            ],
         )
         runner = GoalLoopRunner(
             spec,

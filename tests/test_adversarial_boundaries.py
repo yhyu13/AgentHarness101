@@ -19,13 +19,10 @@ from goal_loop import (
     GoalLoopRunner,
     GoalSpec,
     MakerOutput,
-    StaticChecker,
     StopCondition,
     Verdict,
 )
-from goal_loop.registered_roles import RegisteredMaker
 from goal_persistence import GoalRuntime, GoalStatus, GoalStore
-from tool_registry import Permission, ToolRegistry
 from sandbox import Sandbox
 from observability import TraceLog
 
@@ -40,9 +37,7 @@ def runtime(tmp_db: Path) -> GoalRuntime:
     return GoalRuntime(GoalStore(tmp_db))
 
 
-def spec_with(
-    criteria: list[AcceptanceCriterion], max_rounds: int | None = None
-) -> GoalSpec:
+def spec_with(criteria: list[AcceptanceCriterion], max_rounds: int | None = None) -> GoalSpec:
     stops = [StopCondition(kind="max_rounds", value=max_rounds)] if max_rounds else []
     return GoalSpec(
         objective="adversarial boundary",
@@ -102,12 +97,10 @@ def test_lying_checker_with_failing_commands_blocks_not_completes(
 ) -> None:
     """A checker that lies (PASS) while the machine command fails must not complete."""
     spec = spec_with(
-        [AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+        [AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')],
         max_rounds=10,
     )
-    runner = GoalLoopRunner(
-        spec, runtime, _BlockedMaker(), _LyingChecker(), state_dir=tmp_path
-    )
+    runner = GoalLoopRunner(spec, runtime, _BlockedMaker(), _LyingChecker(), state_dir=tmp_path)
     status = runner.run("t1")
     assert status == GoalStatus.BLOCKED
 
@@ -119,32 +112,27 @@ def test_lying_checker_alone_cannot_complete_failing_command(
     block, proving the machine command — not the checker's word — is the truth for
     command-bearing criteria."""
     spec = spec_with(
-        [AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+        [AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')],
         max_rounds=10,
     )
-    runner = GoalLoopRunner(
-        spec, runtime, _WorkingMaker(), _LyingChecker(), state_dir=tmp_path
-    )
+    runner = GoalLoopRunner(spec, runtime, _WorkingMaker(), _LyingChecker(), state_dir=tmp_path)
     status = runner.run("t1")
     assert status == GoalStatus.BLOCKED
 
 
-def test_budget_exhaustion_is_terminal_and_never_completed(
-    tmp_db: Path, tmp_path: Path
-) -> None:
+def test_budget_exhaustion_is_terminal_and_never_completed(tmp_db: Path, tmp_path: Path) -> None:
     runtime = GoalRuntime(GoalStore(tmp_db))
+
     # A maker that reports huge usage each round exhausts a tiny budget on round 1.
     class _HugeMaker:
         def __call__(self, spec, state, steering):
             return MakerOutput(summary="huge", tokens_used=1_000_000, ok=True)
 
     spec = spec_with(
-        [AcceptanceCriterion("c1", "fails", verify_command="py -c \"raise SystemExit(1)\"")],
+        [AcceptanceCriterion("c1", "fails", verify_command='py -c "raise SystemExit(1)"')],
         max_rounds=10,
     )
-    runner = GoalLoopRunner(
-        spec, runtime, _HugeMaker(), _LyingChecker(), state_dir=tmp_path
-    )
+    runner = GoalLoopRunner(spec, runtime, _HugeMaker(), _LyingChecker(), state_dir=tmp_path)
     status = runner.run("t1", budget_tokens=10)
     assert status == GoalStatus.BUDGET_LIMITED
     # Terminal: cannot be flipped to complete or blocked afterward.
@@ -162,11 +150,40 @@ def test_unconfigured_sandbox_fails_closed() -> None:
 
 def test_trace_survives_restart_and_reconstructs_exactly(tmp_path: Path) -> None:
     log = TraceLog(tmp_path / "session.jsonl")
-    first = log.append("message", {"role": "user", "content": "hi"})
+    log.append("message", {"role": "user", "content": "hi"})
     # Simulate a process restart by reopening the same file.
     reopened = TraceLog(tmp_path / "session.jsonl")
-    second = reopened.append("message", {"role": "assistant", "content": "hello"})
+    reopened.append("message", {"role": "assistant", "content": "hello"})
     replay = reopened.replay()
     assert [e.seq for e in replay] == [0, 1]
     assert replay[0].payload == {"role": "user", "content": "hi"}
     assert replay[1].payload == {"role": "assistant", "content": "hello"}
+
+
+def test_goal_state_does_not_cross_contaminate(runtime: GoalRuntime) -> None:
+    """Two goals share a store but their per-goal state (status, blocked count) is isolated."""
+    runtime.create_goal("a", "do a")
+    runtime.create_goal("b", "do b")
+    # Drive goal "a" to BLOCKED via three consecutive blocking observations.
+    runtime.mark_blocked("a", "r1")
+    runtime.mark_blocked("a", "r2")
+    runtime.mark_blocked("a", "r3")
+    assert runtime.get_goal("a").status == GoalStatus.BLOCKED
+    # Goal "b" is untouched: still active, blocked counter never advanced.
+    b = runtime.get_goal("b")
+    assert b.status == GoalStatus.ACTIVE
+    assert b.blocked_count == 0
+
+
+def test_resume_all_is_idempotent(runtime: GoalRuntime) -> None:
+    """Resume is a pure read: repeated calls return the same active set, and a completed
+    goal drops out of the next batch without double-running."""
+    runtime.create_goal("a", "do a")
+    runtime.create_goal("b", "do b")
+    first = [c.thread_id for c in runtime.resume_all()]
+    second = [c.thread_id for c in runtime.resume_all()]
+    assert first == ["a", "b"]
+    assert second == first  # re-reading does not mutate or duplicate
+    runtime.mark_complete("a", "evidence: shipped")
+    third = [c.thread_id for c in runtime.resume_all()]
+    assert third == ["b"]

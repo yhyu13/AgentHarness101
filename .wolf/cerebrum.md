@@ -19,6 +19,9 @@
 - 自我改进闭环的挂点：`GoalLoopRunner._finalize` 是 run 的唯一收尾点（status+summary 都在这聚合）→ 天然是「结果→教训」的 distill 挂点；`cont.steering_prompt`（anti-drift 模板）是「教训→注入」的挂点。教训用 `correct=False` 承载「别再这么做」（hippocampus 已有该语义），检索用确定性词重叠（`len>=3` 交集），全程不发 LLM——守住「只 mock LLM 边界」。
 - 模块放置防环：新模块若既 `import goal_loop.models`（读 FinalResult）又被 `goal_loop` 用（runner 挂点），会造 `hippocampus→goal_loop` 环。解法是放 `goal_loop/` 内、只 `import hippocampus`，与 `world_verifier.py` 同级对称。
 
+- 新模块接 loop 的两种正交模式：① `Scheduler` 只依赖一个 `Runner` Protocol（`run_until_terminal(thread_id)`），不硬绑 `GoalLoopRunner`，单元测试用 stub 隔离「排序/skip/错误隔离」逻辑，另留一条真 `GoalLoopRunner` 集成测试证明组合；② `Orchestrator.make`/`check` 的签名对齐 `Maker`/`Checker` Protocol，直接当 maker+checker 传进 `GoalLoopRunner`，无需改 loop。
+- fail-closed 的「空 plan」边界：`Orchestrator.make` 的 `ok = not errors and bool(outputs) and all(o.ok)`。空 plan（零步）必须判 `ok=False`（没干活=不 ok），否则 `all([])` 的真空真会让「规划出 0 步」被误判成功。
+
 ## Do-Not-Repeat
 
 - [2026-08-28] 用 `python` 跑 pytest（2.7 无 pytest，报 No module named pytest）。用 `python3`。
@@ -27,7 +30,13 @@
 - [2026-08-29] 用 edit 改 `safety.py` 时，oldString 用 `@dataclass\nclass SafetyGuard:` 当锚点想插常量，结果把 docstring 首行一起删了。教训：改类定义前先 Read 精确行号，oldString 要含完整 docstring 首行，别只锚「类名行」。
 - [2026-08-29] 下结论「X 钩子缺失/没装」前，先查 `token-ledger.json` 的 `lifetime.total_sessions` 和 `.wolf/hooks/_session.json`。数字=0 不一定是钩子没装，可能只是「还没跑过一个会读/写文件的会话」。Kilo 钩子其实早已由 `openwolf init --agent kilo` 生成在 `.kilo/plugin/openwolf/`（11 个 .ts），且 `session.created`/`session.idle` 已触发过（total_sessions 0→1、stop_count 1）。
 
+- [2026-09-01] 本机有 GateGuard「Fact-Forcing Gate」钩子，每次 Edit/Write 前都要先回 4 条事实（谁 import 这文件 / 是否已有同用途文件 / 数据结构 / 用户指令原文）。先 Grep 一次「谁 import」+ Glob「是否已有同用途」再一次性把 4 条写进消息里即可通过，别干等。
+- [2026-09-01] src 布局迁移后，`examples/*.py` 的 `sys.path.insert(0, parent.parent)` 还指 repo root，不是 `src/`，直接跑会 `ModuleNotFoundError: goal_loop`。迁移布局时要连 examples 的 sys.path 一起改成 `parent.parent / "src"`（已修 9 个示例）。
+- [2026-09-01] 跑真 LLM 基线前先核对 model/base_url/key 三件套是否对齐，别假设示例默认值就是对的：本机 env 的 `ANTHROPIC_MODEL=deepseek/deepseek-v4-pro` 与示例硬编码 `MiniMax-M3` 冲突，用「DeepSeek 模型 + MiniMax key」跑出 maker 0 token、goal BLOCKED。环境里可能配的是另一家 provider。
+- [2026-09-01] thinking 模型（deepseek-v4-pro）的 `response.content` 里 `content[0]` 是 `ThinkingBlock`（只有 `.thinking`），不是 `TextBlock`，直接 `.text` 抛 `AttributeError`。提取文本用 `"".join(b.text for b in content if b.type == "text")`。真 LLM 基线跑通三处要改：① thinking block 提取 ② key 顺序 `ANTHROPIC_AUTH_TOKEN or MINIMAX_API_KEY`（对齐 env 三件套）③ token 记账 `input+output`（llm-proxy 的 `input_tokens` 与 `cache_read_input_tokens` 互不重叠，相减得负值 `-97`）。
+
 ## Decision Log
 
 - coverage `source` 断言用「子集」而非「精确相等」：允许新增生产包进闸门，不因列表变化而红。
 - 三个目标并行派发子代理，文件不重叠（目标1=pyproject/scripts/AGENTS，目标2=faux_provider，目标3=goal_loop/world_verifier），最终由主代理统一全量验证。
+- crashed-maker 兜底「维持现状 vs 加兜底」分支：核实代码里早已 fail-closed（`loop_runner.py:210-219` 捕获 maker/checker 异常 → `ok=False`/`FAIL`），`test_red_team.py:61` 已钉。结论是「维持现状 + 测试已钉」，只订正 STATUS 的过时描述，不新增代码。

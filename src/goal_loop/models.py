@@ -237,9 +237,7 @@ class RoundRecord:
                 Verdict(data["checker_verdict"]) if data.get("checker_verdict") else None
             ),
             issues=[Issue.from_dict(i) for i in data.get("issues", [])],
-            verification=[
-                VerificationResult.from_dict(v) for v in data.get("verification", [])
-            ],
+            verification=[VerificationResult.from_dict(v) for v in data.get("verification", [])],
             criteria_satisfied=list(data.get("criteria_satisfied", [])),
             next_round_plan=data.get("next_round_plan", ""),
             human_intervention=data.get("human_intervention", False),
@@ -251,9 +249,7 @@ class RoundRecord:
             "started_at": _iso(self.started_at),
             "finished_at": _iso(self.finished_at),
             "maker_summary": self.maker_summary,
-            "checker_verdict": (
-                self.checker_verdict.value if self.checker_verdict else None
-            ),
+            "checker_verdict": (self.checker_verdict.value if self.checker_verdict else None),
             "issues": [i.to_dict() for i in self.issues],
             "verification": [v.to_dict() for v in self.verification],
             "criteria_satisfied": list(self.criteria_satisfied),
@@ -394,9 +390,7 @@ def _parse_objective(sections: dict[str, str]) -> str:
     # Strip HTML comments and blank/whitespace-only lines, then join the first real
     # paragraph (which is the objective sentence).
     lines = [
-        line
-        for line in body.splitlines()
-        if line.strip() and not line.strip().startswith("<!--")
+        line for line in body.splitlines() if line.strip() and not line.strip().startswith("<!--")
     ]
     if not lines:
         raise ValueError("goal.md '## Goal' section has no objective text")
@@ -406,9 +400,7 @@ def _parse_objective(sections: dict[str, str]) -> str:
 def _parse_criteria(sections: dict[str, str]) -> list[AcceptanceCriterion]:
     body = sections.get("Acceptance Criteria", "").strip()
     if not body:
-        raise ValueError(
-            "goal.md is missing a non-empty '## Acceptance Criteria' section"
-        )
+        raise ValueError("goal.md is missing a non-empty '## Acceptance Criteria' section")
 
     criteria: list[AcceptanceCriterion] = []
     # Criteria are markdown list items. A criterion line is either
@@ -434,9 +426,7 @@ def _parse_criteria(sections: dict[str, str]) -> list[AcceptanceCriterion]:
         )
 
     if not criteria:
-        raise ValueError(
-            "goal.md '## Acceptance Criteria' has no checklist items"
-        )
+        raise ValueError("goal.md '## Acceptance Criteria' has no checklist items")
     return criteria
 
 
@@ -460,9 +450,7 @@ def _parse_scope(sections: dict[str, str]) -> Scope:
 def _parse_stop_conditions(sections: dict[str, str]) -> list[StopCondition]:
     body = sections.get("Stop Conditions", "").strip()
     if not body:
-        raise ValueError(
-            "goal.md is missing a non-empty '## Stop Conditions' section"
-        )
+        raise ValueError("goal.md is missing a non-empty '## Stop Conditions' section")
 
     stops: list[StopCondition] = []
     for line in body.splitlines():
@@ -478,9 +466,7 @@ def _parse_stop_conditions(sections: dict[str, str]) -> list[StopCondition]:
         if "max round" in lowered or "max turn" in lowered or "最大回合" in item:
             number = re.search(r"\d+", item)
             if number:
-                stops.append(
-                    StopCondition(kind="max_rounds", value=int(number.group(0)))
-                )
+                stops.append(StopCondition(kind="max_rounds", value=int(number.group(0))))
         elif "budget" in lowered and "token" in lowered:
             stops.append(StopCondition(kind="budget_tokens"))
         elif "budget" in lowered and ("time" in lowered or "wall" in lowered):
@@ -490,9 +476,7 @@ def _parse_stop_conditions(sections: dict[str, str]) -> list[StopCondition]:
             continue
 
     if not stops:
-        raise ValueError(
-            "goal.md '## Stop Conditions' has no recognizable stop condition"
-        )
+        raise ValueError("goal.md '## Stop Conditions' has no recognizable stop condition")
     return stops
 
 

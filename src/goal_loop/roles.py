@@ -13,9 +13,7 @@ class Maker(Protocol):
     implementation would invoke an LLM and report the tokens it consumed.
     """
 
-    def __call__(
-        self, spec: GoalSpec, state: LoopState, steering: str
-    ) -> MakerOutput: ...
+    def __call__(self, spec: GoalSpec, state: LoopState, steering: str) -> MakerOutput: ...
 
 
 class Checker(Protocol):
