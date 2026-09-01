@@ -291,6 +291,15 @@
 
 关键决策：`LLMJudge` 超时用 daemon 线程 + `join(timeout)` 兜底（fail-closed 不误判 PASS）；`TokenLedger.estimated_cost` 委托 `estimate_cost`，不另写一套计价；`TokenLedger.record` 用 `input_tokens`/`output_tokens` 诚实记账，跨会话 `_load`/`_save` JSON 累加。CI 里 `check.sh` 的 ruff 是「先 format 再 lint 再 test」，顺序固定；`E731`（lambda 赋名）与 examples 的 `E402`（load_dotenv 必须先于 anthropic import）走 per-file-ignores，不硬改语义。
 
+### Era 34 — 真 LLM 基线跑通 + 覆盖率收口
+
+| ME | YOU |
+|---|---|
+| 「now test for me, test are compelte? if not make them complete, use actual llm to test harness, dump result to doc then push to remote」 | ① 测试是否完整：`python3 -m pytest -q` → **206 passed**，完整。② 用真 LLM 跑 harness：`examples/llm_goal_loop.py` 有三处「假设过时」要修——(a) `response.content[0].text` 在 thinking 模型上撞 `ThinkingBlock`（只有 `.thinking` 无 `.text`），改成 `"".join(b.text for b in content if b.type=="text")`；(b) key 顺序 `MINIMAX_API_KEY or ANTHROPIC_AUTH_TOKEN` 先取 MiniMax key 配 DeepSeek 端点跑出 0 token/BLOCKED，改成 `ANTHROPIC_AUTH_TOKEN` 优先对齐 env 三件套；(c) token 记账 `input - cache_read + output` 在 llm-proxy 上相减得负值（`-97`，两字段互不重叠），改成 `input + output`。修完 `deepseek/deepseek-v4-pro`（经 `llm-proxy.tapsvc.com`）跑出 **complete / 1 轮 / ~185 token / 平均 6.21s**，机器 checker `answer()==42` PASS。③ dump 到 `doc/04_faux_provider/benchmark.md`（从「待确认」换成真数字）+ `.wolf/STATUS.md`/`cerebrum.md`。④ commit `2a28a38` 推远程。 |
+| 「re-run coverage gate to reconfirm 97.18%（why not 100%）」 | 覆盖率闸门重跑确认 **97.18%**（1672 stmts / 29 miss / 27 partial branch，闸门 92%）。回答「为何不是 100%」：把 29 行全列出来分了五类——①防御性 `raise ValueError`（畸形 goal.md 才触发，`models.py:389/396/429/479`、`compactor.py:35`）②解析器 `continue` 跳过分支 ③恢复已终态 goal 的 resume 分支（`loop_runner.py:86/171/183/195-199`）④备用 stop condition（`models.py:471/473` budget_tokens/budget_wall_ms）⑤平凡返回（cache pop、`list_specs`、未命中 `return False`）。**没有一条死代码**，都是可触达行为，所以不删；但追 100% 要造畸形 fixture + resume fixture，边际收益低，故闸门定 92% 而非 100%。 |
+
+关键决策：真 LLM 基线不再「待确认」——三处修复里最要紧的是 (a) thinking 模型要过滤 `TextBlock`，不能假设 `content[0]` 是文本。覆盖率收口顺带挖出一条技术债：`goal_persistence/accounting.py:47` 的 `tokens = input - cached + output` 与 example 里同一个缓存记账假设——标准 Anthropic 语义下正确（`cached` 是 `input` 子集），但 llm-proxy 把两字段报成互不重叠的桶，接真 adapter 时会算错；要修得先给 adapter 层定 token 记账契约，不是补覆盖率能解决的。
+
 ---
 
 ## 这个项目怎么教 vibe coding

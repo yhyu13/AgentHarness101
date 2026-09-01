@@ -42,7 +42,7 @@
 | `hippocampus/` | 任务轨迹、重要内容索引、本地缓存、学习/遗忘、回放 | 学习指南 ④ |
 | `tool_registry/` | 注册工具、权限标签、最小权限、schema 校验 | 学习指南 ② |
 | `sandbox/` | Fail-closed 白名单执行器(非 OS 级沙箱) | 学习指南 ③ |
-| `eval_harness/` | 评测集 + 确定性 ExactJudge(可换成 LLM-judge) | 学习指南 ⑤ |
+| `eval_harness/` | 评测集 + 确定性 ExactJudge + LLMJudge(fail-closed,超时/异常/垃圾回复判 FAIL) | 学习指南 ⑤ |
 | `observability/` | Append-only trace 日志 + 字节级回放 | 学习指南 ⑥ |
 | `safety/` | RBAC 角色、高风险 HITL、prompt 注入标记 | 学习指南 M6 |
 | `cost_control/` | 令牌桶限流 + 工具结果缓存 | 学习指南 M5.7 |
@@ -69,11 +69,26 @@ uv pip install -e ".[dev]"
 ## 运行测试
 
 ```bash
-python -m pytest tests -q
+python3 -m pytest -q                 # 全量测试（206 passed）
+scripts/check.sh                     # 四闸：format + lint + test + coverage
 ```
 
-当前 79 个测试全绿:持久化 20、goal_loop 27、上下文压缩 9、海马体 6、其余层 16、
-效率 2。
+当前 **206 个测试全绿，覆盖率 97.18%**（`fail_under=92` 闸门，见 `pyproject.toml` 的
+`[tool.coverage]`）。覆盖 happy path、fail-closed、红队对抗、全系统 E2E 四类场景。
+未覆盖的 ~2.82% 是防御性校验 / 跳过分支 / 恢复终态 goal 的 resume 分支，不是死代码。
+
+## 真 LLM 基线
+
+用真实模型跑通一次 harness（`examples/llm_goal_loop.py`）：
+
+| 指标 | 值 |
+|---|---|
+| 模型 | `deepseek/deepseek-v4-pro`（经 `https://llm-proxy.tapsvc.com`，`ANTHROPIC_AUTH_TOKEN`） |
+| 终态 | complete / 1 轮 |
+| token | ~185（首次冷缓存 565，随缓存波动） |
+| 墙钟 | 5.19–7.50s / 平均 6.21s |
+
+真数字与「只 mock LLM 边界、其余跑真货」的分工见 `doc/04_faux_provider/benchmark.md`。
 
 ## goal_loop 用法
 
@@ -137,21 +152,23 @@ py -3 examples/measure_efficiency.py
 ## 项目布局
 
 ```text
-goal_persistence/            # 持久化目标状态机(状态层)
-goal_loop/                   # maker/checker 验证循环(验证层)
-context_compaction/          # 上下文管理层(80% 截断压缩)
-hippocampus/                 # 长期记忆层
-tool_registry/               # 工具管理层
-sandbox/                     # 执行环境层(fail-closed 白名单执行器)
-eval_harness/                # 验证与评估层
-observability/               # 观测与审计层(append-only trace + 回放)
-safety/                      # 安全横切面(RBAC + HITL + 注入标记)
-cost_control/                # 成本横切面(限流 + 缓存)
+src/                         # 11 个 harness 包（src 布局）
+  goal_persistence/          # 持久化目标状态机(状态层)
+  goal_loop/                 # maker/checker 验证循环 + Scheduler/Orchestrator/SelfImprover
+  context_compaction/        # 上下文管理层(80% 截断压缩)
+  hippocampus/               # 长期记忆层
+  tool_registry/             # 工具管理层
+  sandbox/                   # 执行环境层(fail-closed 白名单 + PathPolicy 文件写隔离)
+  eval_harness/              # 验证与评估层(ExactJudge + LLMJudge fail-closed)
+  observability/             # 观测与审计层(append-only trace + span 记 duration_ms)
+  safety/                    # 安全横切面(RBAC + HITL + 注入标记)
+  cost_control/              # 成本横切面(限流 + 缓存 + TokenLedger + 按模型计价)
 examples/                    # 可运行 demo
-tests/                       # 测试
+tests/                       # 测试（206）
+scripts/check.sh             # 四闸：format + lint + test + coverage
 doc/
   course/                    # TASK.md + 00-课程大纲.md(课程)
-  harness-1hour.html         # 一小时交互式学习指南
+  roadmap/100_tasks.md       # 100 任务 P0/P1/P2 路线图
 JOURNEY.md                   # 项目完整历程(ME/YOU 双栏,中文)
 README.md / README.zh-CN.md  # 英文 / 中文说明
 ```
