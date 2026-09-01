@@ -14,6 +14,20 @@ plus the safety and cost-control cross-cuts:
 Distilled from the Codex goal feature and aligned with the *Agent Harness 101*
 curriculum.
 
+## What it does, in plain terms
+
+You write a goal — an objective plus a list of acceptance criteria. The harness runs it
+the way a careful reviewer would: a **maker** produces a change, an independent
+**checker** re-reads the result and verifies each criterion against the actual artifact,
+not the maker's "done". It loops until every criterion is machine-verified (`complete`),
+the maker stops making progress (`blocked`), or the budget runs out (`budget_limited`).
+
+It is small and fast. Measured: two rounds to completion take **~1.2 s**; overflowing
+context collapses from 48,550 to 609 characters (98.75% reduction) while keeping all 10
+marked items verbatim; replaying a long-term memory trace costs **~0.6 ms**; the
+fail-closed sandbox adds **~5%** on top of a raw subprocess. Full numbers:
+`doc/02_goal_loop/efficiency.md`.
+
 ## Highlight features
 
 - **Two-layer goal system** — `goal_persistence` makes a goal durable (SQLite row,
@@ -162,6 +176,9 @@ uv pip install -e ".[dev]"
 
 ## Run tests
 
+One command runs the whole suite; `scripts/check.sh` is the all-in-one gate — format,
+lint, test, and coverage all pass or it fails.
+
 ```bash
 python3 -m pytest -q                 # full suite
 scripts/check.sh                     # gate: format + lint + test + coverage
@@ -199,6 +216,10 @@ unreachable model skips gracefully rather than failing the batch.
 
 ## Goal loop usage
 
+Three parts: a goal contract (`goal.md`), a durable store, and two callables — a `maker`
+that produces work and an independent `checker` that verifies it. Hand them to
+`GoalLoopRunner` and call `run`; it loops for you and returns a terminal status.
+
 ```python
 from pathlib import Path
 
@@ -224,6 +245,10 @@ independent checker returns a non-FAIL verdict. A maker's self-report never comp
 the goal.
 
 ## Usage
+
+This API does not run the loop — it just remembers a goal's state and token spend.
+Create a goal, ask for a steering prompt while idle, run a turn and record tokens, then
+mark it complete with evidence.
 
 ```python
 from goal_persistence import GoalRuntime, GoalStore, GoalStatus
@@ -251,6 +276,17 @@ goal = runtime.end_turn("thread-1")
 # Complete only with evidence.
 runtime.mark_complete("thread-1", "sandbox tests pass")
 ```
+
+## Efficiency
+
+```bash
+py -3 examples/measure_efficiency.py
+```
+
+It prints and writes `examples/efficiency_report.json`; details in
+`doc/02_goal_loop/efficiency.md`. Measured: two loop rounds ≈ 1.2 s; context compacts
+from 48,550 → 609 chars (98.75% reduction, 10/10 important items kept); hippocampus
+replay ≈ 0.6 ms; sandbox overhead ≈ 5%.
 
 ## Test results
 
@@ -371,5 +407,11 @@ def fibonacci(n: int) -> int:
         If n is negative.
     Type...
 ```
+
+## JOURNEY
+
+The full two-column (ME/YOU) build history — persistence kernel to six-layer harness,
+two external reviews, real composition wiring, and the efficiency measurements — is in
+[`JOURNEY.md`](JOURNEY.md) (Chinese).
 
 

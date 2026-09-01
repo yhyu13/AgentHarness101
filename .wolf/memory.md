@@ -232,3 +232,42 @@
 | 12:18 | Edited README.zh-CN.md | 2→2 lines | ~52 |
 | 12:18 | Edited README.zh-CN.md | expanded (+11 lines) | ~167 |
 | 12:18 | Edited README.zh-CN.md | inline fix | ~15 |
+| 12:20 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
+| 12:28 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
+| 12:32 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
+| 12:41 | Edited README.zh-CN.md | reduced (-12 lines) | ~269 |
+| 12:42 | Edited README.md | expanded (+8 lines) | ~453 |
+| 12:42 | Edited README.md | 3→3 lines | ~51 |
+| 12:42 | Session end: 89 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~94102 tok |
+| 13:12 | Edited README.zh-CN.md | 7→9 lines | ~181 |
+| 13:13 | Edited README.md | 7→9 lines | ~294 |
+| 13:14 | Session end: 91 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~94611 tok |
+
+## Session: 2026-09-01 13:22
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 13:27 | Edited README.md | 4→8 lines | ~82 |
+| 13:27 | Edited README.md | 4→8 lines | ~77 |
+| 13:27 | Edited README.md | 6→9 lines | ~77 |
+| 13:27 | Edited README.md | expanded (+14 lines) | ~253 |
+| 13:27 | Edited README.zh-CN.md | 4→7 lines | ~49 |
+| 13:27 | Edited README.zh-CN.md | 4→7 lines | ~42 |
+| 13:27 | Edited README.zh-CN.md | 6→9 lines | ~61 |
+| 13:27 | Edited README.zh-CN.md | expanded (+11 lines) | ~117 |
+| 13:27 | Session end: 8 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~16391 tok |
+| 13:28 | 给两份 README 加「说人话」怎么工作+预期简介（maker/checker 循环 → complete/blocked/budget_limited，实测 1.2s/98.75%/0.6ms/5%），并给 goal_loop 用法、持久化用法、运行测试三处各补一句人话开头 | README.md, README.zh-CN.md | 两 README 对称新增 intro + 三处 lead-in | 中 |
+| 13:28 | Session end: 8 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~16391 tok |
+| 13:34 | Session end: 8 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~16391 tok |
+| 13:38 | Edited README.zh-CN.md | 3→5 lines | ~56 |
+| 13:38 | Edited README.zh-CN.md | 2→4 lines | ~66 |
+| 13:38 | Edited README.zh-CN.md | modified LLM() | ~121 |
+| 13:38 | Edited README.zh-CN.md | expanded (+9 lines) | ~111 |
+| 13:38 | Edited README.zh-CN.md | inline fix | ~12 |
+| 13:38 | Session end: 13 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~17294 tok |
+| 14:02 | Created README.zh-CN.md | — | ~2727 |
+| 14:02 | Edited README.md | expanded (+11 lines) | ~112 |
+| 14:02 | Edited README.md | expanded (+6 lines) | ~75 |
+| 14:02 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 5 reads | ~20415 tok |
+| 14:13 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 10 reads | ~23829 tok |
+| 14:15 | Session end: 16 writes across 2 files (README.md, README.zh-CN.md) | 10 reads | ~23829 tok |
