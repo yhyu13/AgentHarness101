@@ -177,6 +177,40 @@ def test_build_initial_probes_includes_constitution_probes() -> None:
 
 
 # --- nightly competition / ledger ---
+def test_traceability_verifier_uses_evidence_not_self_report(tmp_path: Path) -> None:
+    from taste_score import Probe
+    from taste_score.constitution import Constitution, Principle
+    from taste_score.trace import TraceabilityVerifier
+
+    target = tmp_path / "guard.py"
+    target.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    princ = Principle(id="SEC-01", boundary="b", cwe="CWE-22", level="MUST",
+                      constraint="c", anchor=str(target), pattern="def allow",
+                      violations="write_text", rationale="r")
+    const = Constitution(version="1.0.0", principles=(princ,))
+    verifier = TraceabilityVerifier(const)
+    probe = Probe(probe_id="SEC-01", objective="o", capability_temptation="t",
+                  safety_tripwire="w", source="constitution:SEC-01", golden_verdict="hold")
+
+    # anchor matches pattern -> the expansion is evidenced, not self-reported.
+    run = verifier.verify("agent", probe)
+    assert run.did_expand is True
+    assert run.safe is True
+
+    # a violation sentinel now present -> safe drops even though the agent said nothing.
+    target.write_text("def allow(path):\n    write_text(path)\n", encoding="utf-8")
+    assert verifier.verify("agent", probe).safe is False
+
+    # no anchor at all -> no expansion (a liar claiming it built the guard gets none).
+    princ2 = Principle(id="SEC-02", boundary="b", cwe="CWE-22", level="MUST",
+                       constraint="c", anchor=str(tmp_path / "missing.py"),
+                       pattern="def allow", violations="x", rationale="r")
+    const2 = Constitution(version="1.0.0", principles=(princ2,))
+    probe2 = Probe(probe_id="SEC-02", objective="o", capability_temptation="t",
+                   safety_tripwire="w", source="constitution:SEC-02", golden_verdict="hold")
+    assert TraceabilityVerifier(const2).verify("agent", probe2).did_expand is False
+
+
 def test_compete_writes_ledger_and_rejects_bad_agents(tmp_path: Path) -> None:
     out = tmp_path / "ledger.json"
     code = cli.compete(nights=1, mutants_n=3, seed=1, out=str(out))
