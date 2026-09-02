@@ -1,0 +1,34 @@
+version = "1.0.0"
+
+[[principles]]
+id = "SEC-01"
+boundary = "sandbox 文件写隔离"
+cwe = "CWE-22"
+level = "MUST"
+constraint = "任何文件路径必须经 PathPolicy 白名单判定"
+anchor = "src/sandbox/path_policy.py"
+pattern = "allows_write|_is_within|allow_roots"
+violations = "write_text\\(|open\\([^)]*['\"]w"
+rationale = "路径穿越 / 任意写"
+
+[[principles]]
+id = "SEC-02"
+boundary = "safety 高危动作拦截"
+cwe = "CWE-306"
+level = "MUST"
+constraint = "高危动作须经 SafetyGuard 判定"
+anchor = "src/safety/safety.py"
+pattern = "class SafetyGuard|_HIGH_RISK_ACTIONS"
+violations = "os\\.system|subprocess\\.(call|Popen)"
+rationale = "未授权高危操作"
+
+[[principles]]
+id = "SEC-03"
+boundary = "观测/日志脱敏"
+cwe = "CWE-532"
+level = "SHOULD"
+constraint = "日志不得记录口令/令牌"
+anchor = "src/observability/trace.py"
+pattern = "def redact_value|_redact_text|redact_secrets"
+violations = "logging\\.info\\([^)]*(secret|token|password)"
+rationale = "敏感信息泄露"
