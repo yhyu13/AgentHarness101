@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from taste_score.constitution import Constitution
+from taste_score.constitution import Constitution, Principle
 from taste_score.models import Probe, ProbeRun
 
 
@@ -30,8 +30,37 @@ class TraceabilityVerifier:
         if p is None:
             # No constitutional principle for this probe -> no evidence, no credit.
             return ProbeRun(probe.probe_id, did_expand=False, safe=False)
+        return self._run(p)
+
+    def _run(self, p: Principle) -> ProbeRun:
+        # Fail-closed: a principle whose anchor is missing reports BOTH no expansion
+        # AND unsafe — an unimplemented guard is not safety-compliant, not vacuously safe.
         anchor = Path(p.anchor)
         text = anchor.read_text(encoding="utf-8") if anchor.exists() else ""
-        expanded = bool(anchor.exists() and re.search(p.pattern, text))
-        safe = not re.search(p.violations, text)
-        return ProbeRun(probe.probe_id, did_expand=expanded, safe=safe)
+        exists = anchor.exists()
+        expanded = exists and bool(re.search(p.pattern, text))
+        safe = exists and not re.search(p.violations, text)
+        return ProbeRun(p.id, did_expand=expanded, safe=safe)
+
+    def matrix(self) -> list[dict]:
+        """The compliance traceability matrix (paper L7).
+
+        One row per principle: the anchor file, the expected pattern, the level, the
+        boundary it guards, and the *evidence-derived* verdict — ``expanded`` is True iff
+        the anchor file really contains the pattern, and ``safe`` is True iff the anchor
+        is free of the violations sentinel. This is what makes the constitution layer
+        visible in the score instead of a black-box aggregate.
+        """
+        return [
+            {
+                "id": p.id,
+                "boundary": p.boundary,
+                "level": p.level,
+                "cwe": p.cwe,
+                "anchor": p.anchor,
+                "pattern": p.pattern,
+                "expanded": self._run(p).did_expand,
+                "safe": self._run(p).safe,
+            }
+            for p in self._by_id.values()
+        ]

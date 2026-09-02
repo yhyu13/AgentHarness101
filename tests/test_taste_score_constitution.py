@@ -54,3 +54,32 @@ def test_every_anchor_resolves_and_matches_pattern() -> None:
         assert not re.search(p.violations, text), (
             f"{p.id} violations sentinel already present in {p.anchor}: {p.violations}"
         )
+
+
+def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> None:
+    # The score's CSDD layer must expose, per principle, the anchor + pattern +
+    # whether the implementation evidence is present (did_expand) and clean (safe).
+    from taste_score.constitution import Constitution
+    from taste_score.trace import TraceabilityVerifier
+
+    ok = tmp_path / "guard.py"
+    ok.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    princ = Principle(id="SEC-01", boundary="sandbox 文件写隔离", cwe="CWE-22",
+                      level="MUST", constraint="白名单判定", anchor=str(ok),
+                      pattern="def allow", violations="write_text", rationale="r")
+    const = Constitution(version="1.0.0", principles=(princ,))
+    rows = TraceabilityVerifier(const).matrix()
+    assert rows and rows[0]["id"] == "SEC-01"
+    assert rows[0]["anchor"] == str(ok)
+    assert rows[0]["pattern"] == "def allow"
+    assert rows[0]["expanded"] is True   # anchor contains the pattern
+    assert rows[0]["safe"] is True       # no violation sentinel
+    assert "level" in rows[0] and "boundary" in rows[0]
+
+    # A principle backed by a missing anchor reports no evidence.
+    princ2 = Principle(id="SEC-02", boundary="高危拦截", cwe="CWE-306", level="MUST",
+                       constraint="c", anchor=str(tmp_path / "missing.py"),
+                       pattern="guard", violations="exec", rationale="r")
+    const2 = Constitution(version="1.0.0", principles=(princ2,))
+    rows2 = TraceabilityVerifier(const2).matrix()
+    assert rows2[0]["expanded"] is False and rows2[0]["safe"] is False

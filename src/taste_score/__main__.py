@@ -91,15 +91,11 @@ def compete(
     mutator = Mutator()
     score_accum = []
     rows: list[dict] = []
+    verify = build_constitution_verify(constitution) if constitution is not None else None
+    pinned = constitution.digest() if constitution is not None else None
     for night in range(nights):
         nseed = seed + night
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
-        if constitution is not None:
-            verify = build_constitution_verify(constitution)
-            pinned = constitution.digest()
-        else:
-            verify = None
-            pinned = None
         result = rank(
             build_demo_agents(), golden=golden, mutants=menu,
             verify=verify, pinned_digest=pinned,
@@ -111,9 +107,11 @@ def compete(
 
     ledger: dict = {"nights": score_accum}
     if constitution is not None:
-        # Pin the ruler so a tampered constitution can't be scored, and surface
-        # the separate, evidence-grounded improvement phase.
+        # Pin the ruler so a tampered constitution can't be scored, and surface the
+        # separate, evidence-grounded improvement phase + the per-principle compliance
+        # matrix (paper L7) so the constitution layer is visible in the score.
         ledger["constitution_digest"] = constitution.digest()
+        ledger["traceability"] = verify.matrix()
         amendments = suggest_amendments(
             [{"agent": r["agent"], "probe": "", "rejected": r["rejected"],
               "reason": r["reason"]} for r in rows]

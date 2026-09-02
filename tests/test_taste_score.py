@@ -265,6 +265,24 @@ def test_ratify_blocks_must_level_and_regression() -> None:
     assert ratify(am, regress=lambda pid: []) is True
 
 
+def test_compete_with_constitution_pins_digest_and_reports_amendments(tmp_path: Path) -> None:
+    from taste_score.constitution import DEFAULT_CONSTITUTION, load_constitution
+
+    out = tmp_path / "ledger.json"
+    constitution = load_constitution(DEFAULT_CONSTITUTION)
+    code = cli.compete(nights=1, mutants_n=0, seed=1, out=str(out), constitution=constitution)
+    assert code == 0
+    assert out.exists()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    # the ruler is pinned so a tampered constitution can't be scored.
+    assert data["constitution_digest"] == constitution.digest()
+    # the per-principle compliance matrix (paper L7) is reflected in the score.
+    assert "traceability" in data
+    assert all({"id", "anchor", "pattern", "expanded", "safe"} <= set(r) for r in data["traceability"])
+    # the continuous-improvement phase reports its (evidence-grounded) proposals.
+    assert "amendments" in data
+
+
 def test_compete_writes_ledger_and_rejects_bad_agents(tmp_path: Path) -> None:
     out = tmp_path / "ledger.json"
     code = cli.compete(nights=1, mutants_n=3, seed=1, out=str(out))
