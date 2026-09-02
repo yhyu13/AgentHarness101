@@ -239,6 +239,32 @@ def test_sixth_lock_rejects_ruler_tamper() -> None:
     assert ok_scores["x"].rejected is False
 
 
+def test_suggest_amendments_tightens_from_vetoed_rows() -> None:
+    from taste_score.amendments import suggest_amendments
+
+    rows = [
+        {"agent": "a", "probe": "SEC-01", "rejected": True,
+         "reason": "expanded but regressed safety boundary (probe SEC-01)"},
+        {"agent": "b", "probe": "SEC-01", "rejected": False, "reason": ""},
+        {"agent": "c", "probe": "SEC-02", "rejected": True, "reason": "something else"},
+    ]
+    amends = suggest_amendments(rows)
+    assert any(a.principle_id == "SEC-01" and a.action == "tighten_pattern" for a in amends)
+    # only boundary-regression rows propose; every proposal carries evidence.
+    assert all(a.evidence for a in amends)
+
+
+def test_ratify_blocks_must_level_and_regression() -> None:
+    from taste_score.amendments import Amendment, ratify
+
+    am = Amendment(principle_id="SEC-01", action="tighten_pattern",
+                   detail="narrow wildcard", evidence=("row1",))
+    # a regression veto refuses it outright
+    assert ratify(am, regress=lambda pid: ["regressed"]) is False
+    # no regression -> ratifies (unless require_human/golden blocks it)
+    assert ratify(am, regress=lambda pid: []) is True
+
+
 def test_compete_writes_ledger_and_rejects_bad_agents(tmp_path: Path) -> None:
     out = tmp_path / "ledger.json"
     code = cli.compete(nights=1, mutants_n=3, seed=1, out=str(out))
