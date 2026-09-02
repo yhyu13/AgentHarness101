@@ -15,10 +15,12 @@ import argparse
 import json
 from pathlib import Path
 
+from taste_score.amendments import ratify, suggest_amendments
 from taste_score.gate import TasteGate
 from taste_score.models import Probe, ProbeRun
 from taste_score.mutator import Mutator
 from taste_score.source import build_initial_probes
+from taste_score.trace import TraceabilityVerifier
 
 LEDGER = Path(__file__).resolve().parent / "ledger.json"
 
@@ -47,9 +49,23 @@ def build_demo_verify() -> object:
     return verify
 
 
-def rank(agents: dict[str, object], golden: list[Probe], mutants: list[Probe]) -> dict:
+def build_constitution_verify(constitution: object) -> object:
+    """Evidence-derived verify backed by the real constitution (anti-self-report)."""
+    return TraceabilityVerifier(constitution)
+
+
+def rank(
+    agents: dict[str, object],
+    golden: list[Probe],
+    mutants: list[Probe],
+    *,
+    verify: object | None = None,
+    pinned_digest: str | None = None,
+) -> dict:
     """Run the gate and return a serializeable ranking from the TasteScores."""
-    scores = TasteGate().score(agents, golden=golden, mutants=mutants, verify=build_demo_verify())
+    verify = verify if verify is not None else build_demo_verify()
+    gate = TasteGate(pinned_digest=pinned_digest)
+    scores = gate.score(agents, golden=golden, mutants=mutants, verify=verify)
     ranking = [
         {
             "agent": name,
@@ -69,21 +85,48 @@ def compete(
     mutants_n: int,
     seed: int,
     out: str,
+    constitution: object | None = None,
 ) -> int:
-    golden = build_initial_probes()
+    golden = build_initial_probes(constitution=constitution)
     mutator = Mutator()
     score_accum = []
+    rows: list[dict] = []
     for night in range(nights):
         nseed = seed + night
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
-        result = rank(build_demo_agents(), golden=golden, mutants=menu)
+        if constitution is not None:
+            verify = build_constitution_verify(constitution)
+            pinned = constitution.digest()
+        else:
+            verify = None
+            pinned = None
+        result = rank(
+            build_demo_agents(), golden=golden, mutants=menu,
+            verify=verify, pinned_digest=pinned,
+        )
         result["night"] = night
         result["seed"] = nseed
         score_accum.append(result)
+        rows.extend(result["ranking"])
+
+    ledger: dict = {"nights": score_accum}
+    if constitution is not None:
+        # Pin the ruler so a tampered constitution can't be scored, and surface
+        # the separate, evidence-grounded improvement phase.
+        ledger["constitution_digest"] = constitution.digest()
+        amendments = suggest_amendments(
+            [{"agent": r["agent"], "probe": "", "rejected": r["rejected"],
+              "reason": r["reason"]} for r in rows]
+        )
+        ledger["amendments"] = [
+            {"principle_id": a.principle_id, "action": a.action, "detail": a.detail,
+             "evidence": list(a.evidence), "ratified": ratify(a)}
+            for a in amendments
+        ]
 
     dest = Path(out)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps({"nights": score_accum}, indent=2), encoding="utf-8")
+    dest.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
     return 0
 
 
@@ -96,10 +139,21 @@ def main(argv: list[str] | None = None) -> int:
     comp.add_argument("--mutants", type=int, default=3)
     comp.add_argument("--seed", type=int, default=421)
     comp.add_argument("--out", default=str(LEDGER))
+    comp.add_argument(
+        "--constitution",
+        default=None,
+        help="path to a constitution.toml; pins it as the ruler and enables traceability verify",
+    )
     comp.set_defaults(fn=compete)
 
     args = parser.parse_args(argv)
-    code = args.fn(args.nights, args.mutants, args.seed, args.out)
+    if args.command == "compete" and args.constitution:
+        from taste_score.constitution import load_constitution
+
+        constitution = load_constitution(Path(args.constitution))
+        code = args.fn(args.nights, args.mutants, args.seed, args.out, constitution=constitution)
+    else:
+        code = args.fn(args.nights, args.mutants, args.seed, args.out)
     print(f"wrote nightly taste-score ledger to {args.out}")
     return code
 

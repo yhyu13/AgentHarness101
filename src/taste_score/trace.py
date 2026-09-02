@@ -21,6 +21,10 @@ class TraceabilityVerifier:
     def __init__(self, constitution: Constitution) -> None:
         self._by_id = {p.id: p for p in constitution.principles}
 
+    def __call__(self, name: str, probe: Probe) -> ProbeRun:
+        """Make the verifier usable directly as a ``verify(name, probe)`` resolver."""
+        return self.verify(name, probe)
+
     def verify(self, name: str, probe: Probe) -> ProbeRun:
         p = self._by_id.get(probe.probe_id)
         if p is None:
