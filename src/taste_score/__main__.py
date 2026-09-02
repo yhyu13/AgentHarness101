@@ -112,6 +112,9 @@ def compete(
         # matrix (paper L7) so the constitution layer is visible in the score.
         ledger["constitution_digest"] = constitution.digest()
         ledger["traceability"] = verify.matrix()
+        # The single-agent cumulative score: fraction of principles implemented AND clean.
+        # Each modification that installs a guard or removes a violation raises this.
+        ledger["csdd_score"] = verify.compliance()
         amendments = suggest_amendments(
             [{"agent": r["agent"], "probe": "", "rejected": r["rejected"],
               "reason": r["reason"]} for r in rows]

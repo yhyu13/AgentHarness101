@@ -42,6 +42,20 @@ class TraceabilityVerifier:
         safe = exists and not re.search(p.violations, text)
         return ProbeRun(p.id, did_expand=expanded, safe=safe)
 
+    def compliance(self) -> float:
+        """The single-agent cumulative CSDD score.
+
+        Fraction of principles that are BOTH implemented (the pattern is present) and
+        clean (no violations sentinel). Each agent modification that installs a guard or
+        removes a violation raises this toward 1.0; any violation or missing guard drops
+        it to 0.0. This is the honest "did the code satisfy the constitution" number —
+        not the gate's Pareto rank, which is for comparing agents.
+        """
+        if not self._by_id:
+            return 0.0
+        good = sum(1 for p in self._by_id.values() if self._run(p).safe and self._run(p).did_expand)
+        return good / len(self._by_id)
+
     def matrix(self) -> list[dict]:
         """The compliance traceability matrix (paper L7).
 

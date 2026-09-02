@@ -170,10 +170,10 @@ def test_build_initial_probes_includes_constitution_probes() -> None:
     from taste_score.constitution import DEFAULT_CONSTITUTION, load_constitution
     probes = build_initial_probes(constitution=load_constitution(DEFAULT_CONSTITUTION))
     assert any(p.source.startswith("constitution:") for p in probes)
-    # MUST-level principles become hold probes, SHOULD/MAY become expand
+    # A security-floor guard always credits by being implemented (+ kept clean), so every
+    # constitution probe's good verdict is "expand" — a compliant guard matches, not fails.
     sec = {p.probe_id: p for p in probes if p.source.startswith("constitution:")}
-    assert sec["SEC-01"].golden_verdict == "hold"   # MUST
-    assert sec["SEC-03"].golden_verdict == "expand"  # SHOULD
+    assert all(p.golden_verdict == "expand" for p in sec.values())
 
 
 # --- nightly competition / ledger ---
@@ -279,6 +279,8 @@ def test_compete_with_constitution_pins_digest_and_reports_amendments(tmp_path: 
     # the per-principle compliance matrix (paper L7) is reflected in the score.
     assert "traceability" in data
     assert all({"id", "anchor", "pattern", "expanded", "safe"} <= set(r) for r in data["traceability"])
+    # the single-agent cumulative CSDD score is exposed (0..1 fraction of principles done).
+    assert 0.0 <= data["csdd_score"] <= 1.0
     # the continuous-improvement phase reports its (evidence-grounded) proposals.
     assert "amendments" in data
 

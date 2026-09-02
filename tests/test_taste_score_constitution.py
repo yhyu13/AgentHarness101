@@ -83,3 +83,31 @@ def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> N
     const2 = Constitution(version="1.0.0", principles=(princ2,))
     rows2 = TraceabilityVerifier(const2).matrix()
     assert rows2[0]["expanded"] is False and rows2[0]["safe"] is False
+
+
+def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
+    # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
+    # Each modification that installs a guard or removes a violation raises it; any
+    # violation or missing guard drops it. This is what "each modification adds points"
+    # measures.
+    from taste_score.constitution import Constitution
+    from taste_score.trace import TraceabilityVerifier
+
+    guard = tmp_path / "guard.py"
+    guard.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    princ = Principle(id="SEC-01", boundary="文件写隔离", cwe="CWE-22", level="MUST",
+                      constraint="白名单", anchor=str(guard), pattern="def allow",
+                      violations="write_text", rationale="r")
+    const = Constitution(version="1.0.0", principles=(princ,))
+    v = TraceabilityVerifier(const)
+    # Fully compliant -> 1.0 (both installed and clean).
+    assert abs(v.compliance() - 1.0) < 1e-9
+    # Introduce a violation (guard now writes to any path) -> safe drops -> 0.0.
+    guard.write_text("def allow(path):\n    write_text(path)\n", encoding="utf-8")
+    assert v.compliance() == 0.0
+    # Remove the guard entirely -> not implemented -> 0.0.
+    guard.write_text("pass\n", encoding="utf-8")
+    assert v.compliance() == 0.0
+    # Empty constitution -> no principles, no credit.
+    empty = Constitution(version="1.0.0", principles=())
+    assert TraceabilityVerifier(empty).compliance() == 0.0
