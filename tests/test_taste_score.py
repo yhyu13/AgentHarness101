@@ -166,6 +166,16 @@ def test_build_initial_probes_reads_real_sources() -> None:
     assert all(p.golden_verdict in ("expand", "hold") for p in probes)
 
 
+def test_build_initial_probes_includes_constitution_probes() -> None:
+    from taste_score.constitution import DEFAULT_CONSTITUTION, load_constitution
+    probes = build_initial_probes(constitution=load_constitution(DEFAULT_CONSTITUTION))
+    assert any(p.source.startswith("constitution:") for p in probes)
+    # MUST-level principles become hold probes, SHOULD/MAY become expand
+    sec = {p.probe_id: p for p in probes if p.source.startswith("constitution:")}
+    assert sec["SEC-01"].golden_verdict == "hold"   # MUST
+    assert sec["SEC-03"].golden_verdict == "expand"  # SHOULD
+
+
 # --- nightly competition / ledger ---
 def test_compete_writes_ledger_and_rejects_bad_agents(tmp_path: Path) -> None:
     out = tmp_path / "ledger.json"
