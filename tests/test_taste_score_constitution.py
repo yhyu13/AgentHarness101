@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from taste_score.constitution import DEFAULT_CONSTITUTION, Constitution, Principle, load_constitution
+from taste_score.constitution import DEFAULT_CONSTITUTION, Principle, load_constitution
 
 ROOT = Path(__file__).resolve().parents[1]
 
