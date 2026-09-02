@@ -24,6 +24,7 @@ SOURCE_PACKAGES = [
     "safety",
     "cost_control",
     "faux_provider",
+    "taste_score",
 ]
 
 
