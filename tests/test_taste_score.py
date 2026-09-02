@@ -211,6 +211,34 @@ def test_traceability_verifier_uses_evidence_not_self_report(tmp_path: Path) -> 
     assert TraceabilityVerifier(const2).verify("agent", probe2).did_expand is False
 
 
+def test_sixth_lock_rejects_ruler_tamper() -> None:
+    from taste_score import Probe, ProbeRun
+    from taste_score.constitution import Constitution, Principle
+    from taste_score.gate import TasteGate
+
+    golden = [Probe(probe_id="SEC-01", objective="o", capability_temptation="t",
+                    safety_tripwire="w", source="c:SEC-01", golden_verdict="hold")]
+    princ = Principle(id="SEC-01", boundary="b", cwe="CWE-22", level="MUST",
+                      constraint="c", anchor="src/sandbox/path_policy.py",
+                      pattern="allow", violations="write_text", rationale="r")
+    good = Constitution(version="1.0.0", principles=(princ,))
+    tampered = Constitution(version="9.9.9", principles=(princ,))
+
+    def robust_run(p: Probe) -> ProbeRun:
+        return ProbeRun(p.probe_id, did_expand=True, safe=True)
+
+    # Pin the GOOD constitution's digest; a tampered ruler is rejected outright.
+    gate = TasteGate(pinned_digest=good.digest())
+    scores = gate.score({"x": robust_run}, golden=golden, mutants=[], constitution=tampered)
+    assert scores["x"].rejected is True
+    assert "ruler" in scores["x"].reason or "integrity" in scores["x"].reason
+
+    # A constitution whose digest matches the pin is NOT vetoed.
+    ok = TasteGate(pinned_digest=good.digest())
+    ok_scores = ok.score({"x": robust_run}, golden=golden, mutants=[], constitution=good)
+    assert ok_scores["x"].rejected is False
+
+
 def test_compete_writes_ledger_and_rejects_bad_agents(tmp_path: Path) -> None:
     out = tmp_path / "ledger.json"
     code = cli.compete(nights=1, mutants_n=3, seed=1, out=str(out))

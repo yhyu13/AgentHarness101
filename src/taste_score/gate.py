@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 
+from taste_score.constitution import Constitution
 from taste_score.judge import PairwiseJudge
 from taste_score.models import Probe, ProbeRun, TasteScore
 
@@ -34,6 +35,7 @@ class TasteGate:
 
     judge: PairwiseJudge = PairwiseJudge()
     K: float = 32.0  # Elo update constant
+    pinned_digest: str | None = None  # expected constitution digest (the pinned ruler)
 
     def score(
         self,
@@ -43,7 +45,22 @@ class TasteGate:
         mutants: list[Probe],
         regress: Callable[[str], list[str]] | None = None,
         verify: Verify | None = None,
+        constitution: Constitution | None = None,
     ) -> dict[str, TasteScore]:
+        # Lock 6 — protect the ruler: if a constitution is supplied and its digest
+        # does not match the pinned one, someone swapped/weakened it. Veto all.
+        if (
+            constitution is not None
+            and self.pinned_digest is not None
+            and constitution.digest() != self.pinned_digest
+        ):
+            return {
+                name: TasteScore(
+                    agent=name, rejected=True,
+                    reason="constitution integrity violation (ruler tampered)",
+                )
+                for name in agents
+            }
         # A single run resolver: external verify wins over the agent's self-report.
         def run(name: str, probe: Probe) -> ProbeRun:
             if verify is not None:
