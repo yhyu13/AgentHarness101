@@ -150,6 +150,28 @@ def test_sandbox_fail_closed_execution_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-08 violations sentinel must be absent"
 
 
+def test_llm_judge_fail_closed_boundary_is_constitutional() -> None:
+    # SEC-08 pins the EXECUTION-layer fail-closed floor (Sandbox denies when no
+    # allowlist). SEC-09 pins a DISTINCT layer of the same CWE-703 surface: the
+    # EVALUATION boundary. The LLMJudge must fail closed — any error, timeout, or
+    # unparseable reply is a FAIL, never an accidental PASS. A judge that swallows a
+    # dead LLM and passes would let a bad result through the gate, and no existing
+    # principle (all anchor sandbox/safety/verifier/injection) would register it. It
+    # must be pinned; otherwise that safety regression would score clean.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-09"), None)
+    assert p is not None, "SEC-09 must pin the LLMJudge fail-closed evaluation boundary"
+    assert p.anchor == "src/eval_harness/judge.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-09 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-09 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
