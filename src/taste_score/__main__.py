@@ -19,6 +19,7 @@ from taste_score.amendments import ratify, suggest_amendments
 from taste_score.gate import TasteGate
 from taste_score.models import Probe, ProbeRun
 from taste_score.mutator import Mutator
+from taste_score.mutation_score import verifier_strength
 from taste_score.source import build_initial_probes
 from taste_score.trace import TraceabilityVerifier
 
@@ -144,6 +145,10 @@ def compete(
         # The single-agent cumulative score: fraction of principles implemented AND clean.
         # Each modification that installs a guard or removes a violation raises this.
         ledger["csdd_score"] = verify.compliance()
+        # The NON-saturable measure: how much of a cheater's fake guard does the verifier
+        # refuse to bless? <1.0 = honest headroom (the naive regex can't yet spot a stub
+        # or comment-only pattern). csdd_score saturates at 1.0; this does not.
+        ledger["verifier_strength"] = verifier_strength(constitution)
         amendments = suggest_amendments(
             [{"agent": r["agent"], "probe": "", "rejected": r["rejected"],
               "reason": r["reason"]} for r in rows]

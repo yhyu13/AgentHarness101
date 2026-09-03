@@ -34,15 +34,26 @@ class TraceabilityVerifier:
             return None
         return self._run(p)
 
+    @staticmethod
+    def classify(pattern: str, violations: str, text: str, probe_id: str) -> ProbeRun:
+        """Pure classification over arbitrary anchor text (mutation-score core).
+
+        ``did_expand`` = the pattern is present; ``safe`` = no violations sentinel is
+        present. This is the naive regex core the mutation-score measures: it cannot yet
+        tell a DEAD STUB or a comment-only pattern from a real guard — which is the honest,
+        non-saturable headroom the score is designed to expose.
+        """
+        expanded = bool(re.search(pattern, text))
+        safe = not re.search(violations, text)
+        return ProbeRun(probe_id, did_expand=expanded, safe=safe)
+
     def _run(self, p: Principle) -> ProbeRun:
         # Fail-closed: a principle whose anchor is missing reports BOTH no expansion
         # AND unsafe — an unimplemented guard is not safety-compliant, not vacuously safe.
         anchor = Path(p.anchor)
-        text = anchor.read_text(encoding="utf-8") if anchor.exists() else ""
-        exists = anchor.exists()
-        expanded = exists and bool(re.search(p.pattern, text))
-        safe = exists and not re.search(p.violations, text)
-        return ProbeRun(p.id, did_expand=expanded, safe=safe)
+        if not anchor.exists():
+            return ProbeRun(p.id, did_expand=False, safe=False)
+        return self.classify(p.pattern, p.violations, anchor.read_text(encoding="utf-8"), p.id)
 
     def compliance(self) -> float:
         """The single-agent cumulative CSDD score.
