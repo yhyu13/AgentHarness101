@@ -200,6 +200,50 @@ def _resolve_attribute_constant(
     return _NON_CONSTANT
 
 
+def _resolve_instance_attr_constant(
+    class_def: ast.ClassDef,
+    attr: str,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> object:
+    """The single constant an INSTANCE attribute ``self.<attr>`` is bound to in ``__init__``, or
+    ``_NON_CONSTANT``.
+
+    A guard can carry a constant through an instance attribute set at build time
+    (``self._ALWAYS = True`` in ``def __init__``) rather than in the class body — the residual
+    ``instance-attr-hidden`` evasion the class-body-only resolver blesses. This resolves it, but
+    conservatively: only if ``__init__`` assigns ``self.<attr>`` EXACTLY ONCE and that RHS resolves
+    to a provable constant. A reassignment, a decision on an argument (``self._allowed = allowed``),
+    or no ``__init__``/assignment stays ``_NON_CONSTANT`` so a real guard is never over-rejected.
+    """
+    init = _find_method(class_def, "__init__")
+    if init is None:
+        return _NON_CONSTANT
+    found: ast.AST | None = None
+    for stmt in init.body:
+        if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+            continue
+        target = stmt.targets[0]
+        if not (
+            isinstance(target, ast.Attribute)
+            and target.attr == attr
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+        ):
+            continue
+        if found is not None:
+            return _NON_CONSTANT  # reassigned -> cannot prove a single constant
+        found = stmt.value
+    if found is None:
+        return _NON_CONSTANT
+    ok, key = _resolve_literal_key(found, env, helpers, sources, resolving, classes, current_class)
+    return key if ok else _NON_CONSTANT
+
+
 def _resolve_attribute_value_constant(
     node: ast.Attribute,
     env: dict[str, object],
@@ -247,6 +291,20 @@ def _resolve_attribute_value_constant(
         )
         if ok:
             return True, key
+    # Not a class-body attribute; an INSTANCE attribute bound in ``__init__`` is the same inert
+    # pass-through (``self._ALWAYS = True`` in the constructor). Resolve it for the ``self`` receiver
+    # (enclosing class) and the ``_Helper()`` instance receiver — a bare ``_Mod.val`` class-attribute
+    # read is still only a class-body lookup, so this branch never invents a constant for it.
+    is_self = isinstance(val, ast.Name) and val.id == "self"
+    is_instance = (
+        isinstance(val, ast.Call) and isinstance(val.func, ast.Name) and val.func.id in classes
+    )
+    if is_self or is_instance:
+        c = _resolve_instance_attr_constant(
+            target_class, attr, env, helpers, sources, resolving, classes, current_class
+        )
+        if c is not _NON_CONSTANT:
+            return True, c
     return False, None
 
 
@@ -416,7 +474,16 @@ def _is_inert_function(
     """
     returns = _collect_returns_of(fn)
     if not returns:
-        return False  # no explicit return -> dead-stub territory, handled by _is_dead_stub
+        # No explicit return (a constructor that only assigns constants, or a setter). Such a def is
+        # part of an inert guard if every statement assigns only a constant (``self._ALWAYS = True``),
+        # passes, imports, or is a docstring — it determines nothing. Real logic (a call, a loop, a
+        # non-constant assignment like ``self._allowed = allowed``) makes it non-inert, so a real
+        # setup/constructor is never flagged. Without this, a class whose ONLY non-inert-looking member
+        # is ``__init__`` (implicitly returns None, so the old branch said 'not inert') would poison the
+        # whole module and let the constructor-bound instance-attribute cheat slip through.
+        return all(
+            _is_inert_statement(s, env, helpers, sources, classes, current_class) for s in fn.body
+        )
     key: set[object] = set()
     for r in returns:
         ok, k = _resolve_literal_key(

@@ -22,14 +22,16 @@ one, so the measure never truly saturates.
 The inert-guard hardening has already caught the literal-return (``partial``) pass-through, the
 Name-returned (``constant-hidden``) one, the top-level HELPER-CALL (``helper-hidden``) one
 (``return _always(...)``), the ATTRIBUTE/METHOD-CALL (``attribute-hidden``) one
-(``return self._always(...)`` / ``return _Helper().always(...)``), and — this fire — the bare
-ATTRIBUTE VALUE (``attr-value-hidden``) one (``return self._ALWAYS`` where ``_ALWAYS = True`` in the
-class body), which the resolver now traces into the class-body constant assignment. The current
-residual headroom is ``instance-attr-hidden``: a constant returned through an INSTANCE attribute bound
-in the constructor (``return self._ALWAYS`` where ``_ALWAYS`` is set in ``def __init__``, not the class
-body) that the resolver only proves for a NAME / a top-level helper CALL / a bound-method CALL / a
-class-body attribute VALUE, so it still blesses. Each ratchet step is: catch this level, add a subtler
-one.
+(``return self._always(...)`` / ``return _Helper().always(...)``), the bare ATTRIBUTE VALUE
+(``attr-value-hidden``) one (``return self._ALWAYS`` where ``_ALWAYS = True`` in the class body),
+and — this fire — the CONSTRUCTOR-BOUND INSTANCE ATTRIBUTE (``instance-attr-hidden``) one
+(``return self._ALWAYS`` where ``_ALWAYS = True`` in ``def __init__``), which the resolver now traces
+into the constructor assignment. The current residual headroom is ``inst-attr-mutator-hidden``: a
+constant returned through an INSTANCE attribute bound in a NON-``__init__`` mutator method
+(``self._ALWAYS = True`` inside ``_setup()``, read in ``check()``) that the resolver only proves for a
+NAME / a top-level helper CALL / a bound-method CALL / a class-body attribute VALUE / an
+``__init__``-bound instance attribute, so it still blesses. Each ratchet step is: catch this level,
+add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -233,10 +235,12 @@ def _instance_attr_hidden(token: str) -> str:
     self._ALWAYS`` where ``_ALWAYS`` is bound in ``def __init__``, not in the class body).
 
     Once the resolver traces a bare class-body attribute VALUE (``self._ALWAYS`` with ``_ALWAYS =
-    True`` in the class body), the next honest headroom is an attribute bound to its constant in the
-    CONSTRUCTOR instead — the resolver only looks at class-body assignments, so an instance attribute
-    set at build time still reads as a real decision and blesses. Carries the pattern, valid Python —
-    the 'add a subtler mutant' ratchet once ``attr-value-hidden`` is caught.
+    True`` in the class body), the next honest headroom was an attribute bound to its constant in the
+    CONSTRUCTOR — the resolver then only looked at class-body assignments, so an instance attribute set
+    at build time still read as a real decision and blessed. This is the now-CAUGHT level: the resolver
+    traces a constructor-bound instance attribute (and treats a no-return ``__init__`` that only assigns
+    constants as inert), so this fake is rejected. Carries the pattern, valid Python — the 'add a
+    subtler mutant' ratchet that ``inst-attr-mutator-hidden`` now supersedes.
     """
     sym = _guard_symbol(token)
     if not sym:
@@ -268,6 +272,53 @@ def _instance_attr_hidden(token: str) -> str:
         )
     return (
         f"class _Helper:\n    def __init__(self):\n        self.val = True\n{sym} = _Helper().val\n"
+    )
+
+
+def _method_bound_attr_hidden(token: str) -> str:
+    """A guard returning its constant through an INSTANCE attribute bound in a NON-``__init__``
+    mutator method (``return self._ALWAYS`` where ``self._ALWAYS = True`` is set inside ``_setup()``,
+    not the class body or constructor).
+
+    Once the resolver traces an ``__init__``-bound instance attribute, the next honest headroom is an
+    attribute bound in an ARBITRARY method — the resolver only looks at class-body assignments and the
+    constructor, so an instance attribute set at ``_setup()`` then read by ``check()`` still reads as a
+    real decision and blesses. Carries the pattern, valid Python — the 'add a subtler mutant' ratchet
+    once ``instance-attr-hidden`` is caught.
+    """
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    def check(self):\n"
+            "        if " + literal + ":\n"
+            "            return True\n"
+            "        self._setup()\n"
+            "        return self.val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    def check(self, action):\n"
+            "        self._setup()\n"
+            "        return self._ALWAYS\n"
+        )
+    # A def-name OR a bare-identifier symbol: a function that reads an instance attribute bound in a
+    # non-__init__ mutator. `<sym>` returns `h.val` (never proven constant — bound in `_setup`, not the
+    # constructor), so it stays a real decision and the module is NOT inert -> still blessed.
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    h = _Helper()\n"
+        "    h._setup()\n"
+        "    return h.val\n"
     )
 
 
@@ -320,11 +371,15 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # to its constant.
         MutantCase("attr-value-hidden", _attr_value_hidden(tok), False),
         # A pass-through whose constant is returned through an INSTANCE attribute set in __init__
-        # (return self._ALWAYS where _ALWAYS is bound in the constructor, not the class body) — the
-        # honest residual headroom once a class-body attribute VALUE is traced (the resolver proves a
-        # constant for a NAME / top-level helper CALL / bound-method CALL / class-body attribute
-        # VALUE, not an attribute bound at build time).
+        # (return self._ALWAYS where _ALWAYS is bound in the constructor, not the class body) — now
+        # CAUGHT: the resolver traces a constructor-bound instance attribute into its constant.
         MutantCase("instance-attr-hidden", _instance_attr_hidden(tok), False),
+        # A pass-through whose constant is returned through an INSTANCE attribute bound in a NON-
+        # __init__ mutator method (self._ALWAYS set in _setup(), read in check()) — the honest
+        # residual headroom once an __init__-bound attribute is traced (the resolver proves a constant
+        # for a NAME / top-level helper CALL / bound-method CALL / class-body attribute VALUE /
+        # __init__-bound instance attribute, not one bound in an arbitrary method).
+        MutantCase("inst-attr-mutator-hidden", _method_bound_attr_hidden(tok), False),
     ]
 
 
