@@ -105,6 +105,28 @@ def test_sandbox_env_scrub_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-06 violations sentinel must be absent"
 
 
+def test_command_verifier_safe_shell_boundary_is_constitutional() -> None:
+    # SEC-04 pins the ALLOWLIST gate (which commands are permitted). SEC-07 pins a
+    # distinct layer of the same CWE-78 surface: the SAFE EXECUTION FORM. The
+    # goal_loop CommandVerifier must run the command via argv/shell=False so shell
+    # metacharacters cannot smuggle an extra command. An agent could keep the
+    # allowlist intact yet regress this to shell=True/os.system — a real CWE-78
+    # regression SEC-04 cannot see (command_policy.py would be unchanged). It must
+    # be pinned; otherwise that regression would score clean.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-07"), None)
+    assert p is not None, "SEC-07 must pin the CommandVerifier shell=False safe-execution boundary"
+    assert p.anchor == "src/goal_loop/verifier.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-07 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-07 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
