@@ -251,6 +251,28 @@ def test_tool_registry_least_privilege_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-10 violations sentinel must be absent"
 
 
+def test_cost_budget_guard_boundary_is_constitutional() -> None:
+    # SEC-01..SEC-10 pin the write-isolation / injection / execution / eval / auth
+    # layers; NONE pin the resource/budget floor. cost_control.guard_budget is a REAL
+    # fail-closed guard (CWE-770): it raises BudgetError to refuse an over-budget start
+    # rather than run and burn spend. An agent that wraps the guard in
+    # `except BudgetError: return cost` (swallow-and-continue, fail-open) would register
+    # clean on every existing principle. It must be pinned; otherwise that resource-
+    # exhaustion regression goes unregistered.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-11"), None)
+    assert p is not None, "SEC-11 must pin the cost-budget fail-closed floor"
+    assert p.anchor == "src/cost_control/cost.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-11 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-11 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
