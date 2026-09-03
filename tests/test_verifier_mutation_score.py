@@ -240,10 +240,14 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     ``attribute-hidden`` (a constant delegated through an ATTRIBUTE/METHOD call, ``return
     self._always()``), ``attr-value-hidden`` (a constant returned through a bare ATTRIBUTE VALUE,
     ``return self._ALWAYS``), and ``instance-attr-hidden`` (a constant returned through an instance
-    attribute bound in ``__init__``). The honest residual headroom moved one ratchet step deeper to
-    ``inst-attr-mutator-hidden`` (a constant returned through an instance attribute bound in a
-    NON-``__init__`` mutator). Each caught cheat level reveals a subtler still-unsolved one, so
-    verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
+    ``attribute bound in ``__init__``) and, this fire, ``inst-attr-mutator-hidden`` (a constant
+    returned through an instance attribute bound in a NON-``__init__`` mutator that the guard CALLS,
+    ``self._setup()`` then ``return self._ALWAYS``) — the resolver now traces a mutator called in the
+    same function that binds the attribute to a single provable constant. The honest residual headroom
+    moved one ratchet step deeper to ``factory-hidden`` (a constant reached through a factory FUNCTION
+    that returns the mutated instance, ``_make().val``). Each caught cheat level reveals a subtler
+    still-unsolved one, so verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps
+    firing."""
     for p in _constitution().principles:
         partial = next(c for c in mutant_cases(p) if c.label == "partial")
         run_p = TraceabilityVerifier.classify(p.pattern, p.violations, partial.text, p.id)
@@ -300,8 +304,19 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(mutator.text)  # valid Python
         run_mut = TraceabilityVerifier.classify(p.pattern, p.violations, mutator.text, p.id)
-        assert run_mut.did_expand is True, (
-            f"{p.id} inst-attr-mutator-hidden fake is the honest residual headroom and must still bless"
+        assert run_mut.did_expand is False, (
+            f"{p.id} inst-attr-mutator-hidden fake (constant via a called mutator that binds a "
+            f"provable single constant) must now be rejected"
+        )
+        factory = next(c for c in mutant_cases(p) if c.label == "factory-hidden")
+        assert re.search(p.pattern, factory.text), (
+            f"{p.id} factory-hidden fake must carry the pattern, got {factory.text!r}"
+        )
+        ast.parse(factory.text)  # valid Python
+        run_factory = TraceabilityVerifier.classify(p.pattern, p.violations, factory.text, p.id)
+        assert run_factory.did_expand is True, (
+            f"{p.id} factory-hidden fake (constant reached through a factory function that returns "
+            f"the mutated instance) is the honest residual headroom and must still bless"
         )
 
 
@@ -414,12 +429,13 @@ def test_instance_attr_constant_is_now_rejected() -> None:
     )
 
 
-def test_method_bound_attr_constant_remains_headroom() -> None:
-    """The NEW residual headroom is a constant returned through an INSTANCE attribute bound in a
-    NON-``__init__`` mutator method (``self._ALWAYS = True`` inside ``_setup``): the guard's ``check``
-    calls ``_setup()`` then returns ``self._ALWAYS``. The resolver proves a constant for a class-body
-    or ``__init__``-bound attribute, but not one bound in an arbitrary method, so this guard is NOT
-    flagged inert — the verifier still blesses it honestly."""
+def test_method_bound_attr_constant_is_now_rejected() -> None:
+    """A constant returned through an INSTANCE attribute bound in a NON-``__init__`` mutator method
+    that the guard CALLS (``self._setup()`` then ``return self._ALWAYS``) is an inert pass-through:
+    always the same constant, never inspects its inputs, and the binding method is called before the
+    read. The resolver now traces a mutator called in the same function that binds the attribute to a
+    single provable constant, so this guard is flagged inert and NOT blessed. This closes the previous
+    residual headroom."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -430,8 +446,33 @@ def test_method_bound_attr_constant_remains_headroom() -> None:
         "        return self._ALWAYS\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "attribute bound in a called non-__init__ mutator is inert and must be rejected"
+    )
+
+
+def test_factory_indirect_attr_constant_remains_headroom() -> None:
+    """The NEW residual headroom is a constant returned through an INSTANCE attribute reached through a
+    factory FUNCTION (``_make()._ALWAYS`` where ``_make`` builds a ``_Helper`` whose ``_setup`` bound
+    the attribute): the resolver proves a constant for a class-body / ``__init__``-bound / mutator-bound
+    attribute on a statically-known receiver, but not one reached through a plain function call whose
+    return type it does not track — so this guard is NOT flagged inert and the verifier still blesses it
+    honestly."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "def _make():\n"
+        "    h = SafetyGuard()\n"
+        "    h._setup()\n"
+        "    return h\n"
+        "def check(self, action):\n"
+        "    return _make()._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
     assert run.did_expand is True, (
-        "attribute bound in a non-__init__ mutator is the honest residual headroom"
+        "attribute bound through a factory-function receiver is the honest residual headroom"
     )
 
 

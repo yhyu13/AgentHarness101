@@ -322,6 +322,56 @@ def _method_bound_attr_hidden(token: str) -> str:
     )
 
 
+def _factory_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a factory FUNCTION
+    (``_make().val``): the resolver proves a class-body/``__init__``/mutator-bound attribute on a
+    statically-known receiver, but NOT one reached through a plain function call whose return type it
+    does not track — so this guard STILL blesses. The 'add a subtler mutant' ratchet once
+    ``inst-attr-mutator-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "def _make():\n"
+            "    h = _Helper()\n"
+            "    h._setup()\n"
+            "    return h\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _make().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "def _make():\n"
+            f"    h = {sym}()\n"
+            "    h._setup()\n"
+            "    return h\n"
+            "def check(self, action):\n"
+            "    return _make()._ALWAYS\n"
+        )
+    # A def-name OR a bare-identifier symbol: a function that reads the attribute on an instance
+    # built by a factory function (``_make().val``) — the return type of ``_make`` is not tracked,
+    # so the attribute read is not proven a constant -> the guard stays a real decision.
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "def _make():\n"
+        "    h = _Helper()\n"
+        "    h._setup()\n"
+        "    return h\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _make().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -375,11 +425,15 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # CAUGHT: the resolver traces a constructor-bound instance attribute into its constant.
         MutantCase("instance-attr-hidden", _instance_attr_hidden(tok), False),
         # A pass-through whose constant is returned through an INSTANCE attribute bound in a NON-
-        # __init__ mutator method (self._ALWAYS set in _setup(), read in check()) — the honest
-        # residual headroom once an __init__-bound attribute is traced (the resolver proves a constant
-        # for a NAME / top-level helper CALL / bound-method CALL / class-body attribute VALUE /
-        # __init__-bound instance attribute, not one bound in an arbitrary method).
+        # __init__ mutator method (self._ALWAYS set in _setup(), read in check()) — now CAUGHT: the
+        # resolver traces a mutator called in the same function that binds the attribute to a single
+        # provable constant.
         MutantCase("inst-attr-mutator-hidden", _method_bound_attr_hidden(tok), False),
+        # A pass-through whose constant is read on an instance reached through a factory FUNCTION
+        # (_make().val) — the honest residual headroom once a called mutator is traced (the resolver
+        # proves a constant for a class-body / __init__-bound / mutator-bound attribute on a
+        # statically-known receiver, but not one reached through a plain function call).
+        MutantCase("factory-hidden", _factory_hidden(tok), False),
     ]
 
 

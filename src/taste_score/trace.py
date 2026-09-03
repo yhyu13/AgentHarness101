@@ -244,6 +244,163 @@ def _resolve_instance_attr_constant(
     return key if ok else _NON_CONSTANT
 
 
+def _instance_receiver_class(
+    value: ast.AST,
+    current_class: ast.ClassDef | None,
+    locals_map: dict[str, ast.ClassDef],
+    classes: dict[str, ast.ClassDef],
+) -> ast.ClassDef | None:
+    """The class an attribute-receiver expression refers to, or ``None``.
+
+    ``self`` -> the enclosing class; a local name bound to ``_Cls(...)`` (``locals_map``); a
+    ``_Cls(...)`` construction call; or a bare module-level class name ``_Mod``. ``None`` means the
+    receiver could not be statically tied to a class (e.g. a factory function call), so the read is
+    NOT proven a constant."""
+    if isinstance(value, ast.Name) and value.id == "self" and current_class is not None:
+        return current_class
+    if isinstance(value, ast.Name) and value.id in locals_map:
+        return locals_map[value.id]
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id in classes
+    ):
+        return classes[value.func.id]
+    if isinstance(value, ast.Name) and value.id in classes:
+        return classes[value.id]
+    return None
+
+
+def _is_instance_receiver(
+    value: ast.AST,
+    current_class: ast.ClassDef | None,
+    locals_map: dict[str, ast.ClassDef],
+    classes: dict[str, ast.ClassDef],
+) -> bool:
+    """True iff ``value`` is an instance receiver the resolver can tie to a class for the
+    ``__init__``/mutator looks — ``self``, a local bound to ``_Cls(...)``, or a ``_Cls(...)`` call.
+    A bare module class name ``_Mod.val`` is NOT an instance receiver (its ``val`` is a class
+    attribute, resolved by the class-body path), so this stays False there."""
+    if isinstance(value, ast.Name) and value.id == "self" and current_class is not None:
+        return True
+    if isinstance(value, ast.Name) and value.id in locals_map:
+        return True
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id in classes
+    ):
+        return True
+    return False
+
+
+def _named_local_classes(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    classes: dict[str, ast.ClassDef],
+) -> dict[str, ast.ClassDef]:
+    """Map a local name to the class it is constructed from by a plain ``x = _Cls(...)`` assignment."""
+    out: dict[str, ast.ClassDef] = {}
+    for stmt in fn.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Name)
+            and stmt.value.func.id in classes
+        ):
+            out[stmt.targets[0].id] = classes[stmt.value.func.id]
+    return out
+
+
+def _iter_calls_of(stmt: ast.stmt) -> list[ast.Call]:
+    """The ``ast.Call`` nodes in ``stmt`` that are DIRECT actions — not descending into a nested
+    function/class/lambda body (a nested def's calls are not this function's actions)."""
+    out: list[ast.Call] = []
+    stack = list(ast.iter_child_nodes(stmt))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue  # don't descend into nested definitions
+        if isinstance(node, ast.Call):
+            out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _method_binds_attr_constant(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+    attr: str,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    class_def: ast.ClassDef,
+) -> object:
+    """The single constant a method binds ``self.<attr>`` to EXACTLY ONCE, or ``_NON_CONSTANT``.
+
+    A mutator (``_setup``) can set ``self._ALWAYS = True`` — the attribute the guard later reads. A
+    reassignment, a binding from a non-constant RHS (an argument, a decision), or no binding keeps it
+    ``_NON_CONSTANT`` so a real mutator that decides is never over-rejected. ``class_def`` is the
+    method's owner, threaded as ``current_class`` so a ``self._helper()`` call in the RHS resolves too."""
+    found: ast.AST | None = None
+    for stmt in method.body:
+        if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+            continue
+        target = stmt.targets[0]
+        if not (
+            isinstance(target, ast.Attribute)
+            and target.attr == attr
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+        ):
+            continue
+        if found is not None:
+            return _NON_CONSTANT  # reassigned -> cannot prove a single constant
+        found = stmt.value
+    if found is None:
+        return _NON_CONSTANT
+    ok, key = _resolve_literal_key(found, env, helpers, sources, frozenset(), classes, class_def)
+    return key if ok else _NON_CONSTANT
+
+
+def _mutator_bound_attr_constant(
+    enclosing_fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    receiver_class: ast.ClassDef,
+    attr: str,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    locals_map: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> object:
+    """The constant ``receiver.<attr>`` is bound to by a method of ``receiver_class`` that
+    ``enclosing_fn`` CALLS, or ``_NON_CONSTANT``.
+
+    The ``inst-attr-mutator-hidden`` evasion: a guard calls ``self._setup()`` (or ``h._setup()`` on a
+    local instance) then reads ``self._ALWAYS`` — the value comes from a mutator, not the class body or
+    ``__init__``. If the enclosing guard function calls a method of the receiver's class that binds
+    ``<attr>`` to a provable single constant, the read IS that constant, so the guard is inert.
+    Conservative: only a method called in the same function that binds the asked-for attribute to one
+    constant proves it — a real guard that calls ``_setup`` for other side effects but reads a different,
+    genuinely state-dependent attribute stays non-constant."""
+    for stmt in enclosing_fn.body:
+        for call in _iter_calls_of(stmt):
+            if not isinstance(call.func, ast.Attribute):
+                continue
+            recv = _instance_receiver_class(call.func.value, current_class, locals_map, classes)
+            if recv is not receiver_class:
+                continue
+            method = _find_method(recv, call.func.attr)
+            if method is None:
+                continue
+            c = _method_binds_attr_constant(method, attr, env, helpers, sources, classes, recv)
+            if c is not _NON_CONSTANT:
+                return c
+    return _NON_CONSTANT
+
+
 def _resolve_attribute_value_constant(
     node: ast.Attribute,
     env: dict[str, object],
@@ -252,6 +409,9 @@ def _resolve_attribute_value_constant(
     resolving: frozenset[str],
     classes: dict[str, ast.ClassDef],
     current_class: ast.ClassDef | None,
+    *,
+    enclosing_fn: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+    locals_map: dict[str, ast.ClassDef] | None = None,
 ) -> tuple[bool, object]:
     """``(is_constant, key)`` for a bare attribute VALUE with no call (``self._ALWAYS``,
     ``_Helper().val``, ``_Mod.val``).
@@ -259,22 +419,21 @@ def _resolve_attribute_value_constant(
     The residual inert-guard evasion: a guard returns its constant through a plain attribute READ
     rather than a literal, a NAME, a top-level helper CALL, or a bound-method CALL, so
     ``return self._ALWAYS`` (where ``_ALWAYS = True`` in the class body) always returns the same
-    constant yet reads as state-dependent. Resolves it to the class-body constant assignment.
+    constant yet reads as state-dependent. Resolves it to the class-body constant assignment, then an
+    ``__init__``-bound instance attribute, then — the ``inst-attr-mutator-hidden`` evasion — a mutator
+    method the same function CALLS that binds ``<attr>`` to a single provable constant.
 
-    Anti-over-rejection: only resolves when the attribute is bound to a PROVABLE constant literal in a
-    class body we can statically see. An attribute set in ``__init__`` (an instance attribute), mutated
-    later, or carrying a real decision (a ``Compare`` like ``path in roots`` is a different node, never
-    here) is NOT resolved — so a real guard is never flagged.
+    Anti-over-rejection: only resolves when the attribute is bound to a PROVABLE constant literal we
+    can statically see (class body, ``__init__``, or a called mutator). An attribute carrying a real
+    decision (a ``Compare`` like ``path in roots`` is a different node, never here), bound from an
+    argument, reassigned, or reached through a factory function (``_make().val``) is NOT resolved — so a
+    real guard is never flagged. ``enclosing_fn``/``locals_map`` let the mutator look see which method a
+    guard actually calls on the receiver.
     """
     attr = node.attr
     val = node.value
-    target_class: ast.ClassDef | None = None
-    if isinstance(val, ast.Name) and val.id == "self" and current_class is not None:
-        target_class = current_class
-    elif isinstance(val, ast.Call) and isinstance(val.func, ast.Name) and val.func.id in classes:
-        target_class = classes[val.func.id]
-    elif isinstance(val, ast.Name) and val.id in classes:
-        target_class = classes[val.id]
+    locals_map = locals_map or {}
+    target_class = _instance_receiver_class(val, current_class, locals_map, classes)
     if target_class is None:
         return False, None
     for stmt in target_class.body:
@@ -292,16 +451,28 @@ def _resolve_attribute_value_constant(
         if ok:
             return True, key
     # Not a class-body attribute; an INSTANCE attribute bound in ``__init__`` is the same inert
-    # pass-through (``self._ALWAYS = True`` in the constructor). Resolve it for the ``self`` receiver
-    # (enclosing class) and the ``_Helper()`` instance receiver — a bare ``_Mod.val`` class-attribute
-    # read is still only a class-body lookup, so this branch never invents a constant for it.
-    is_self = isinstance(val, ast.Name) and val.id == "self"
-    is_instance = (
-        isinstance(val, ast.Call) and isinstance(val.func, ast.Name) and val.func.id in classes
-    )
-    if is_self or is_instance:
+    # pass-through (``self._ALWAYS = True`` in the constructor). Resolve it for an instance receiver
+    # (``self`` / a local bound to ``_Cls(...)`` / a ``_Cls(...)`` call) — a bare ``_Mod.val`` class-
+    # attribute read is still only a class-body lookup, so this branch never invents a constant for it.
+    if _is_instance_receiver(val, current_class, locals_map, classes):
         c = _resolve_instance_attr_constant(
             target_class, attr, env, helpers, sources, resolving, classes, current_class
+        )
+        if c is not _NON_CONSTANT:
+            return True, c
+    # A mutator the SAME function calls binds ``<attr>`` to a single provable constant
+    # (``self._setup()`` then ``return self._ALWAYS``) — the ``inst-attr-mutator-hidden`` evasion.
+    if enclosing_fn is not None:
+        c = _mutator_bound_attr_constant(
+            enclosing_fn,
+            target_class,
+            attr,
+            env,
+            helpers,
+            sources,
+            classes,
+            locals_map,
+            current_class,
         )
         if c is not _NON_CONSTANT:
             return True, c
@@ -316,6 +487,9 @@ def _resolve_literal_key(
     resolving: frozenset[str] = frozenset(),
     classes: dict[str, ast.ClassDef] | None = None,
     current_class: ast.ClassDef | None = None,
+    *,
+    enclosing_fn: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+    locals_map: dict[str, ast.ClassDef] | None = None,
 ) -> tuple[bool, object]:
     """``(is_constant, key)`` for ``node`` — a hashable identity so two constant literals compare
     equal iff structurally identical.
@@ -387,7 +561,15 @@ def _resolve_literal_key(
         # (``self._ALWAYS``, ``_Helper().val``) — resolves to the constant, so an inert guard that
         # always returns the same value via an attribute read is no longer read as state-dependent.
         return _resolve_attribute_value_constant(
-            node, env, helpers, sources, resolving, classes or {}, current_class
+            node,
+            env,
+            helpers,
+            sources,
+            resolving,
+            classes or {},
+            current_class,
+            enclosing_fn=enclosing_fn,
+            locals_map=locals_map,
         )
     return False, None
 
@@ -484,10 +666,19 @@ def _is_inert_function(
         return all(
             _is_inert_statement(s, env, helpers, sources, classes, current_class) for s in fn.body
         )
+    locals_map = _named_local_classes(fn, classes)
     key: set[object] = set()
     for r in returns:
         ok, k = _resolve_literal_key(
-            r.value, env, helpers, sources, frozenset(), classes, current_class
+            r.value,
+            env,
+            helpers,
+            sources,
+            frozenset(),
+            classes,
+            current_class,
+            enclosing_fn=fn,
+            locals_map=locals_map,
         )
         if not ok:
             return False  # a decision on state -> real guard
