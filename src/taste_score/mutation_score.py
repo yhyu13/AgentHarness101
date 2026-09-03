@@ -327,7 +327,8 @@ def _factory_hidden(token: str) -> str:
     (``_make().val``): the resolver proves a class-body/``__init__``/mutator-bound attribute on a
     statically-known receiver, but NOT one reached through a plain function call whose return type it
     does not track — so this guard STILL blesses. The 'add a subtler mutant' ratchet once
-    ``inst-attr-mutator-hidden`` is caught."""
+    ``inst-attr-mutator-hidden`` is caught.
+    """
     sym = _guard_symbol(token)
     if not sym:
         literal = token.replace("\\", "")
@@ -367,6 +368,60 @@ def _factory_hidden(token: str) -> str:
         "    h = _Helper()\n"
         "    h._setup()\n"
         "    return h\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _make().val\n"
+    )
+
+
+def _nested_factory_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a factory that delegates
+    to ANOTHER builder (``_make()`` returns ``_build()``; the guard reads ``_make().val``). Once the
+    resolver traces a factory ONE level deep (a direct ``_Cls(...)`` construction or a local bound to
+    one), the next honest headroom is a factory whose return expression is ITSELF a call — the resolver
+    does not recurse, so the builder's return type is untracked, the read is not proven a constant, and
+    the guard still blesses. The 'add a subtler mutant' ratchet once ``factory-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "def _build():\n"
+            "    h = _Helper()\n"
+            "    h._setup()\n"
+            "    return h\n"
+            "def _make():\n"
+            "    return _build()\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _make().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "def _build():\n"
+            f"    h = {sym}()\n"
+            "    h._setup()\n"
+            "    return h\n"
+            "def _make():\n"
+            "    return _build()\n"
+            "def check(self, action):\n"
+            "    return _make()._ALWAYS\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "def _build():\n"
+        "    h = _Helper()\n"
+        "    h._setup()\n"
+        "    return h\n"
+        "def _make():\n"
+        "    return _build()\n"
         f"def {sym}(*args, **kwargs):\n"
         "    return _make().val\n"
     )
@@ -430,10 +485,16 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # provable constant.
         MutantCase("inst-attr-mutator-hidden", _method_bound_attr_hidden(tok), False),
         # A pass-through whose constant is read on an instance reached through a factory FUNCTION
-        # (_make().val) — the honest residual headroom once a called mutator is traced (the resolver
-        # proves a constant for a class-body / __init__-bound / mutator-bound attribute on a
-        # statically-known receiver, but not one reached through a plain function call).
+        # (_make().val) — now CAUGHT: the resolver traces a factory's single statically-known return
+        # class (a direct _Cls(...) construction or a local bound to one) and resolves the attribute
+        # constant through the mutator the factory CALLS.
         MutantCase("factory-hidden", _factory_hidden(tok), False),
+        # A pass-through whose constant is read on an instance reached through a factory that delegates
+        # to ANOTHER builder (_make() returns _build(); the guard reads _make().val) — the resolver
+        # traces a factory only ONE level deep and does not recurse, so the builder's return type is
+        # untracked and the read stays non-constant: the honest residual headroom once factory-hidden is
+        # caught.
+        MutantCase("nested-factory-hidden", _nested_factory_hidden(tok), False),
     ]
 
 

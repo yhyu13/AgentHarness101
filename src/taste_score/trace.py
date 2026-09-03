@@ -271,6 +271,64 @@ def _instance_receiver_class(
     return None
 
 
+def _factory_return_class(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    classes: dict[str, ast.ClassDef],
+) -> ast.ClassDef | None:
+    """The single class a pure-constructor factory returns, or ``None``.
+
+    A factory that does ``h = _Cls(...); return h`` (or ``return _Cls(...)``) returns ONE statically
+    known class. A factory that returns a parameter, an arbitrary expression, or different classes in
+    different branches stays ``None`` so a genuinely dynamic factory is never over-resolved (which would
+    let a real factory-returned guard be misjudged inert)."""
+    locals_map = _named_local_classes(fn, classes)
+    returns = _collect_returns_of(fn)
+    found: ast.ClassDef | None = None
+    for r in returns:
+        c = _return_expr_class(r.value, locals_map, classes)
+        if c is None:
+            return None
+        if found is not None and c is not found:
+            return None
+        found = c
+    return found
+
+
+def _return_expr_class(
+    expr: ast.AST,
+    locals_map: dict[str, ast.ClassDef],
+    classes: dict[str, ast.ClassDef],
+) -> ast.ClassDef | None:
+    """The class an expression constructs: a direct ``_Cls(...)`` call, or a local name bound to one."""
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in classes:
+        return classes[expr.func.id]
+    if isinstance(expr, ast.Name) and expr.id in locals_map:
+        return locals_map[expr.id]
+    return None
+
+
+def _factory_receiver(
+    value: ast.AST,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
+    """``(class, factory_fn)`` for a ``_make().attr`` receiver, or ``(None, None)``.
+
+    ``value`` is a call to a module-level factory that provably constructs and returns ONE class; the
+    returned ``factory_fn`` is the enclosing context to use for the mutator look, because the mutator
+    that binds the constant is called inside the factory body, not the guard."""
+    if not (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and sources
+        and value.func.id in sources
+    ):
+        return None, None
+    fn = sources[value.func.id]
+    cls = _factory_return_class(fn, classes)
+    return (cls, fn) if cls is not None else (None, None)
+
+
 def _is_instance_receiver(
     value: ast.AST,
     current_class: ast.ClassDef | None,
@@ -434,6 +492,16 @@ def _resolve_attribute_value_constant(
     val = node.value
     locals_map = locals_map or {}
     target_class = _instance_receiver_class(val, current_class, locals_map, classes)
+    enclosing = enclosing_fn
+    receiver_locals = locals_map
+    if target_class is None:
+        # A factory-returned instance receiver (``_make().val``): trace the factory's single
+        # statically-known return class, and treat the FACTORY as the enclosing context for the mutator
+        # look (the mutator that binds the constant is called inside the factory body, not the guard).
+        target_class, factory_fn = _factory_receiver(val, sources, classes)
+        if factory_fn is not None and target_class is not None:
+            enclosing = factory_fn
+            receiver_locals = _named_local_classes(factory_fn, classes)
     if target_class is None:
         return False, None
     for stmt in target_class.body:
@@ -462,16 +530,18 @@ def _resolve_attribute_value_constant(
             return True, c
     # A mutator the SAME function calls binds ``<attr>`` to a single provable constant
     # (``self._setup()`` then ``return self._ALWAYS``) — the ``inst-attr-mutator-hidden`` evasion.
-    if enclosing_fn is not None:
+    # For a factory receiver, ``enclosing``/``receiver_locals`` are the factory's (the mutator is
+    # called inside the factory body), so a factory-returned constant is caught too.
+    if enclosing is not None:
         c = _mutator_bound_attr_constant(
-            enclosing_fn,
+            enclosing,
             target_class,
             attr,
             env,
             helpers,
             sources,
             classes,
-            locals_map,
+            receiver_locals,
             current_class,
         )
         if c is not _NON_CONSTANT:
@@ -632,6 +702,45 @@ def _collect_returns(stmt: ast.stmt, out: list[ast.Return]) -> None:
                 _collect_returns(s, out)
 
 
+def _class_is_fully_inert(
+    class_def: ast.ClassDef,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    _depth: int = 0,
+) -> bool:
+    """True iff every member of a class is an inert statement — a shell class whose methods only set /
+    return constants and decide nothing. A real guard (a method that branches on its inputs) is NOT
+    fully-inert, so a factory returning such an instance never resolves to a constant. ``_depth`` caps
+    the (theoretical) self-referential-class recursion so an outlandish ``class C: def make(): return
+    C()`` cannot hang the detector."""
+    if _depth > 8:
+        return False
+    return all(
+        _is_inert_statement(s, env, helpers, sources, classes, class_def, _depth=_depth)
+        for s in class_def.body
+    )
+
+
+def _returns_inert_instance(
+    expr: ast.AST,
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    _depth: int = 0,
+) -> bool:
+    """True iff ``expr`` constructs (or is a local name bound to) an instance of a FULLY-INERT class —
+    a pure factory-ship of an inert shell, which contributes no real guard logic."""
+    locals_map = _named_local_classes(fn, classes)
+    cls = _return_expr_class(expr, locals_map, classes)
+    if cls is None:
+        return False
+    return _class_is_fully_inert(cls, env, helpers, sources, classes, _depth=_depth + 1)
+
+
 def _is_inert_function(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     env: dict[str, object],
@@ -639,6 +748,7 @@ def _is_inert_function(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     current_class: ast.ClassDef | None,
+    _depth: int = 0,
 ) -> bool:
     """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
     constant literal and never depends on its inputs.
@@ -652,7 +762,11 @@ def _is_inert_function(
     through a NAME (``return ALWAYS``) resolves to its value and is caught. ``helpers``/
     ``sources`` let a constant returned through a top-level HELPER CALL (``return _always()``)
     be traced, and now a constant returned through a BOUND-METHOD CALL on the enclosing class
-    (``return self._always()``) is traced too, via ``current_class``/``classes``.
+    (``return self._always()``) is traced too, via ``current_class``/``classes``. A return that
+    is a pure factory-ship of a FULLY-INERT class (``return _make_()`` / ``return h`` where ``h``
+    is built from an inert shell) is likewise inert — otherwise a factory (which returns an
+    instance, not a literal) would poison the module's inertness and let a factory-hidden cheat
+    slip through.
     """
     returns = _collect_returns_of(fn)
     if not returns:
@@ -664,7 +778,8 @@ def _is_inert_function(
         # is ``__init__`` (implicitly returns None, so the old branch said 'not inert') would poison the
         # whole module and let the constructor-bound instance-attribute cheat slip through.
         return all(
-            _is_inert_statement(s, env, helpers, sources, classes, current_class) for s in fn.body
+            _is_inert_statement(s, env, helpers, sources, classes, current_class, _depth=_depth)
+            for s in fn.body
         )
     locals_map = _named_local_classes(fn, classes)
     key: set[object] = set()
@@ -681,6 +796,11 @@ def _is_inert_function(
             locals_map=locals_map,
         )
         if not ok:
+            # A pure factory-ship of an inert class is itself inert, so a factory that only builds an
+            # inert shell does not un-poison the module's inertness.
+            if _returns_inert_instance(r.value, fn, env, helpers, sources, classes, _depth=_depth):
+                key.add("inert-instance")
+                continue
             return False  # a decision on state -> real guard
         key.add(repr(k))
     return len(key) == 1  # always the same constant -> constant function -> inert
@@ -700,6 +820,7 @@ def _is_inert_statement(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     current_class: ast.ClassDef | None,
+    _depth: int = 0,
 ) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
     module docstring, a constant-only assignment, an inert function, or a class composed only
@@ -719,9 +840,14 @@ def _is_inert_statement(
         )
         return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _is_inert_function(stmt, env, helpers, sources, classes, current_class)
+        return _is_inert_function(
+            stmt, env, helpers, sources, classes, current_class, _depth=_depth
+        )
     if isinstance(stmt, ast.ClassDef):
-        return all(_is_inert_statement(s, env, helpers, sources, classes, stmt) for s in stmt.body)
+        return all(
+            _is_inert_statement(s, env, helpers, sources, classes, stmt, _depth=_depth)
+            for s in stmt.body
+        )
     return False
 
 

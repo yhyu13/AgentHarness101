@@ -314,9 +314,21 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(factory.text)  # valid Python
         run_factory = TraceabilityVerifier.classify(p.pattern, p.violations, factory.text, p.id)
-        assert run_factory.did_expand is True, (
+        assert run_factory.did_expand is False, (
             f"{p.id} factory-hidden fake (constant reached through a factory function that returns "
-            f"the mutated instance) is the honest residual headroom and must still bless"
+            f"a fully-inert mutated instance) must now be rejected — the resolver traces a factory's "
+            f"single statically-known return class and resolves the attribute constant through it"
+        )
+        nested_factory = next(c for c in mutant_cases(p) if c.label == "nested-factory-hidden")
+        assert re.search(p.pattern, nested_factory.text), (
+            f"{p.id} nested-factory-hidden fake must carry the pattern, got {nested_factory.text!r}"
+        )
+        ast.parse(nested_factory.text)  # valid Python
+        run_nf = TraceabilityVerifier.classify(p.pattern, p.violations, nested_factory.text, p.id)
+        assert run_nf.did_expand is True, (
+            f"{p.id} nested-factory-hidden fake (constant reached through a factory that delegates "
+            f"to ANOTHER builder, whose return type is not tracked) is the honest residual headroom "
+            f"and must still bless"
         )
 
 
@@ -451,13 +463,13 @@ def test_method_bound_attr_constant_is_now_rejected() -> None:
     )
 
 
-def test_factory_indirect_attr_constant_remains_headroom() -> None:
-    """The NEW residual headroom is a constant returned through an INSTANCE attribute reached through a
-    factory FUNCTION (``_make()._ALWAYS`` where ``_make`` builds a ``_Helper`` whose ``_setup`` bound
-    the attribute): the resolver proves a constant for a class-body / ``__init__``-bound / mutator-bound
-    attribute on a statically-known receiver, but not one reached through a plain function call whose
-    return type it does not track — so this guard is NOT flagged inert and the verifier still blesses it
-    honestly."""
+def test_factory_indirect_attr_constant_is_now_rejected() -> None:
+    """A constant returned through an INSTANCE attribute reached through a factory FUNCTION
+    (``_make()._ALWAYS`` where ``_make`` builds a ``_Helper`` whose ``_setup`` bound the attribute) is
+    an inert pass-through: the factory returns a fully-inert class instance and the attribute read is
+    provably one constant. The resolver now traces a factory's single statically-known return class and
+    resolves the attribute constant through the mutator the factory CALLS, so this guard is flagged inert
+    and NOT blessed. This closes the previous residual headroom (``factory-hidden``)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -471,9 +483,96 @@ def test_factory_indirect_attr_constant_remains_headroom() -> None:
         "    return _make()._ALWAYS\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, (
-        "attribute bound through a factory-function receiver is the honest residual headroom"
+    assert run.did_expand is False, (
+        "attribute bound through a factory-function receiver (fully-inert class) is inert and must be rejected"
     )
+
+
+def test_nested_factory_indirect_attr_constant_remains_headroom() -> None:
+    """The NEW residual headroom is a constant reached through a factory that delegates to ANOTHER
+    builder whose return type the resolver does not track (``_make()`` returns ``_build()``, and the
+    guard reads ``_make().val``). The resolver traces a factory only ONE level deep — a factory whose
+    return expression is itself a call (not a direct ``_Cls(...)`` construction or a local bound to one)
+    is not resolved, so the read is not proven a constant and the guard still blesses honestly."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "def _build():\n"
+        "    h = SafetyGuard()\n"
+        "    h._setup()\n"
+        "    return h\n"
+        "def _make():\n"
+        "    return _build()\n"
+        "def check(self, action):\n"
+        "    return _make()._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "attribute bound through a factory that delegates to another builder is the honest residual headroom"
+    )
+
+
+def test_factory_that_decides_on_state_is_still_blessed() -> None:
+    """Anti-over-rejection: a real guard that reads an attribute off a factory-returned instance where
+    the factory builds a REAL, state-deciding guard (``check`` returns ``path in roots``, a non-constant)
+    is a genuine decision, not an inert pass-through. The resolver refuses to prove a constant (the class
+    is not fully-inert), so the guard stays blessed."""
+    p = _constitution().principles[0]  # SEC-01 'allows_write|_is_within|allow_roots'
+    guard = (
+        "class _Guard:\n"
+        "    _allowed_roots = ('/a', '/b')\n"
+        "    def allows_write(self, path):\n"
+        "        return path in self._allowed_roots\n"
+        "def _make():\n"
+        "    return _Guard()\n"
+        "def allows_write(self, path):\n"
+        "    return _make().allows_write(path)\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a factory-returned instance that genuinely decides on state must stay a real guard"
+    )
+    assert run.safe is True
+
+
+def test_dynamic_factory_return_is_still_blessed() -> None:
+    """Anti-over-rejection: a factory whose return type is genuinely dynamic — it returns a parameter
+    or an expression the resolver cannot tie to a statically-known class — is NOT resolved, so an
+    attribute read off it stays non-constant and the guard is blessed (the resolver only proves a
+    constant for a factory that provably returns ONE fully-inert class built directly)."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "def _make(kind):\n"
+        "    if kind == 'a':\n"
+        "        return SafetyGuard()\n"
+        "    return None\n"
+        "def check(self, action):\n"
+        "    return _make('a')._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a factory with a dynamic/branching return type is not a provable single-constant receiver"
+    )
+
+
+def test_real_guard_method_only_is_still_blessed() -> None:
+    """Anti-over-rejection guard for the factory receiver change: a real ``check`` that decides on its
+    inputs (returns ``action in self._allowed``, a Compare) is NOT inert; the presence of a factory
+    function in the module must not flip a genuinely deciding guard into a rejected inert shell."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    _allowed = ('read', 'write')\n"
+        "    def check(self, action):\n"
+        "        return action in self._allowed\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, "a real branching guard must stay blessed"
 
 
 def test_constructor_bound_attr_from_argument_is_real_guard() -> None:
