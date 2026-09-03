@@ -6,6 +6,8 @@ refuses to bless. The naive regex core cannot yet tell a dead stub or a comment-
 pattern from a real guard, so the score is honestly <1.0 — that gap is the point.
 """
 
+from pathlib import Path
+
 from taste_score.constitution import DEFAULT_CONSTITUTION, Constitution, load_constitution
 from taste_score.mutation_score import mutant_cases, verifier_strength
 from taste_score.trace import TraceabilityVerifier
@@ -47,3 +49,61 @@ def test_classify_core_is_pure_and_deterministic() -> None:
     a = TraceabilityVerifier.classify(p.pattern, p.violations, "class X:\n pass\n", "p")
     b = TraceabilityVerifier.classify(p.pattern, p.violations, "class X:\n pass\n", "p")
     assert a == b
+
+
+def test_classify_rejects_dead_stub_guard() -> None:
+    """A cheater ships ``class <guard>: pass`` — the naive regex blessed that as a real
+    expansion (did_expand=True, safe=True). A hardened verifier must refuse to bless a
+    placeholder shell that carries the symbol but has no logic behind it."""
+    p = _constitution().principles[1]  # SEC-02 pattern 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    run = TraceabilityVerifier.classify(
+        p.pattern, p.violations, "class SafetyGuard:\n    pass\n", p.id
+    )
+    assert run.did_expand is False
+
+
+def test_classify_rejects_comment_only_guard() -> None:
+    """A symbol that appears ONLY inside a comment is not an implementation. The naive
+    regex counted ``# allows_write`` as a genuine expansion; the hardened verifier must not."""
+    p = _constitution().principles[0]  # SEC-01 pattern 'allows_write|_is_within|allow_roots'
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, "# allows_write\n", p.id)
+    assert run.did_expand is False
+
+
+def test_classify_rejects_docstring_only_stub() -> None:
+    """A class whose body is only a docstring + ``pass`` is still a shell — the symbol is
+    present but there is no logic. The hardening must reject it as a dead stub too."""
+    p = _constitution().principles[1]  # SEC-02 pattern 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    run = TraceabilityVerifier.classify(
+        p.pattern, p.violations, 'class SafetyGuard:\n    """no logic"""\n    pass\n', p.id
+    )
+    assert run.did_expand is False
+
+
+def test_classify_still_blesses_a_real_guard() -> None:
+    """Hardening must NOT over-reject: a symbol present AND backed by real logic still reads
+    as a genuine safe expansion. This guards against tightening into a false-negative on a
+    genuinely implemented guard."""
+    p = _constitution().principles[1]  # SEC-02 pattern 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    real = (
+        "class SafetyGuard:\n"
+        "    _HIGH_RISK_ACTIONS = ('rm', 'format')\n"
+        "    def check(self, action):\n"
+        "        return action in self._HIGH_RISK_ACTIONS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, real, p.id)
+    assert run.did_expand is True
+    assert run.safe is True
+
+
+def test_hardened_verifier_still_sees_every_constitution_anchor_as_compliant() -> None:
+    """The hardening must NOT over-reject a real guard: every genuine constitution anchor (a
+    real ``src/`` file with real logic) still reads as implemented (did_expand) AND clean
+    (safe) — i.e. csdd stays 1.0 after tightening. This is the false-negative guard."""
+    for p in _constitution().principles:
+        anchor = Path(p.anchor)
+        assert anchor.exists(), f"{p.id} anchor missing: {p.anchor}"
+        text = anchor.read_text(encoding="utf-8")
+        run = TraceabilityVerifier.classify(p.pattern, p.violations, text, p.id)
+        assert run.did_expand is True, f"{p.id} lost its expansion after hardening"
+        assert run.safe is True, f"{p.id} reads as unsafe after hardening"

@@ -8,11 +8,56 @@ present and a ``violations`` sentinel that must be absent). Deterministic, no LL
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
 from taste_score.constitution import Constitution, Principle
 from taste_score.models import Probe, ProbeRun
+
+
+def _body_is_placeholder(body: list[ast.stmt]) -> bool:
+    """True iff a def/class body is only a docstring/``pass``/``...`` — no real logic."""
+    stmts = list(body)
+    if (
+        stmts
+        and isinstance(stmts[0], ast.Expr)
+        and isinstance(stmts[0].value, ast.Constant)
+        and isinstance(stmts[0].value.value, str)
+    ):
+        stmts = stmts[1:]  # drop the docstring
+    return all(
+        isinstance(s, ast.Pass) or (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))
+        for s in stmts
+    )
+
+
+def _stmt_is_placeholder(s: ast.stmt) -> bool:
+    """True iff a top-level statement implements nothing: a shell def/class, a bare
+    ``pass``, a docstring/``...``, or an import (imports alone are not a guard)."""
+    if isinstance(s, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _body_is_placeholder(s.body)
+    if isinstance(s, ast.Pass):
+        return True
+    if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant):
+        return True  # module docstring / ellipsis
+    if isinstance(s, (ast.Import, ast.ImportFrom)):
+        return True
+    return False
+
+
+def _is_dead_stub(text: str) -> bool:
+    """True iff a module is only a placeholder shell: a dead ``class X: pass``, a bare
+    docstring, or a comment-only/empty module. A guard symbol can be *present* yet carry no
+    logic — the naive regex counts that as an expansion, the hardened verifier must not.
+    Returns False on unparseable input so a real (valid) source file is never rejected."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, TypeError):
+        return False
+    if not tree.body:
+        return True  # empty / comment-only module -> no guard implemented
+    return all(_stmt_is_placeholder(s) for s in tree.body)
 
 
 class TraceabilityVerifier:
@@ -38,12 +83,16 @@ class TraceabilityVerifier:
     def classify(pattern: str, violations: str, text: str, probe_id: str) -> ProbeRun:
         """Pure classification over arbitrary anchor text (mutation-score core).
 
-        ``did_expand`` = the pattern is present; ``safe`` = no violations sentinel is
-        present. This is the naive regex core the mutation-score measures: it cannot yet
-        tell a DEAD STUB or a comment-only pattern from a real guard — which is the honest,
-        non-saturable headroom the score is designed to expose.
+        ``did_expand`` = the pattern is present AND the module is not just a placeholder
+        shell (a dead ``class X: pass`` / comment-only / docstring-only module). ``safe`` =
+        no violations sentinel is present. Hardened beyond a bare regex: it no longer
+        blesses a guard symbol that carries no logic, which is the naive gap the
+        mutation-score is designed to expose.
         """
         expanded = bool(re.search(pattern, text))
+        if expanded:
+            # A symbol can be present yet be a shell; refuse to bless a placeholder guard.
+            expanded = not _is_dead_stub(text)
         safe = not re.search(violations, text)
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
 

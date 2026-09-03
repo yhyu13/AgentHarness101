@@ -9,10 +9,12 @@ comment, an entirely absent guard) and count what fraction the verifier REFUSES 
 as a genuine safe expansion.
 
 A defect is ``blessed`` (the verifier fails) when ``classify`` returns
-``did_expand=True and safe=True`` for something that is NOT a real capability — the naive
-regex core can't yet tell a dead stub or a comment-only pattern from a real guard. Each
-missed fake is honest headroom; hardening the verifier (a wire/call check, not a regex)
-raises the score, and you can always add a subtler mutant, so it never truly saturates.
+``did_expand=True and safe=True`` for something that is NOT a real capability. The verifier
+refuses to bless a bare placeholder (a dead ``class X: pass``, a comment-only/docstring-only
+shell) but still can't tell a *partial* guard — one that carries the symbol and real code yet
+does nothing effective — from a real one. Each missed fake is honest headroom; hardening the
+verifier raises the score, and you can always add a subtler mutant, so it never truly
+saturates.
 """
 
 from __future__ import annotations
