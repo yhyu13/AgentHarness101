@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 
@@ -36,8 +36,20 @@ class Constitution:
     principles: tuple[Principle, ...]
 
     def digest(self) -> str:
-        """Stable content hash — the 'ruler' signature the gate pins."""
-        payload = (self.version, *[p.id for p in sorted(self.principles, key=lambda p: p.id)])
+        """Stable content hash of the FULL constitution — the 'ruler' signature the gate pins.
+
+        Covers the version AND every field of every principle (boundary/cwe/level/constraint/
+        anchor/pattern/violations/rationale), not just the ids. A ruler tamper that weakens a
+        ``pattern`` or ``violations`` sentinel IN PLACE (same id, same version) changes the
+        digest, so Lock 6 (``禁改尺子``) vetoes it — an agent cannot silently loosen the ruler
+        to score itself ``safe`` on code that actually contains a violation.
+        """
+        principle_fields = tuple(f.name for f in fields(Principle))
+        rows = [
+            tuple(getattr(p, name) for name in principle_fields)
+            for p in sorted(self.principles, key=lambda p: p.id)
+        ]
+        payload = (self.version, *rows)
         return hashlib.sha256(repr(payload).encode("utf-8")).hexdigest()
 
 

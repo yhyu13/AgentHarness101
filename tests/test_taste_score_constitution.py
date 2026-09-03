@@ -42,6 +42,31 @@ def test_constitution_digest_changes_when_version_changes() -> None:
     assert a.digest() != b.digest()
 
 
+def test_constitution_digest_changes_when_principle_content_changes() -> None:
+    # Lock 6 ("禁改尺子") must catch a ruler tamper at the CONTENT level, not only when
+    # a principle is added/removed/renamed. The digest hashes the full principle payload;
+    # otherwise an agent could weaken a `violations`/`pattern` sentinel IN PLACE (same id,
+    # same version) and the pinned digest would still match — so the gate would NOT veto a
+    # ruler that was silently weakened to score itself "safe" on code that actually has a
+    # violation. That is the inside-the-ruler Goodhart move Lock 6 exists to stop.
+    from taste_score.constitution import Constitution, Principle
+
+    def mk(violations: str) -> Constitution:
+        return Constitution(
+            version="1.0.0",
+            principles=(
+                Principle(id="SEC-01", boundary="sandbox 文件写隔离", cwe="CWE-22",
+                          level="MUST", constraint="白名单判定",
+                          anchor="src/sandbox/path_policy.py",
+                          pattern="allows_write", violations=violations, rationale="r"),
+            ),
+        )
+
+    strict = mk("write_text\\(|open\\([^)]*['\"]w")
+    weakened = mk("THIS_NEVER_MATCHES")  # same id/version, only the sentinel changed
+    assert strict.digest() != weakened.digest()
+
+
 def test_every_anchor_resolves_and_matches_pattern() -> None:
     # Authoring rule: a constitution principle must trace to a REAL src/ file that
     # actually contains its implementation pattern — no invented security domains.
