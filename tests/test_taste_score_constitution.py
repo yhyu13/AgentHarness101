@@ -323,6 +323,32 @@ def test_world_verifier_fail_closed_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-12 violations sentinel must be absent"
 
 
+def test_goal_loop_crash_fail_closed_boundary_is_constitutional() -> None:
+    # SEC-01..SEC-12 pin the write-isolation / injection / execution / eval / auth /
+    # budget / verify-the-world layers; NONE pin the goal-loop's CRASH envelope. The
+    # GoalLoopRunner (loop_runner.py) fail-closes on a broken maker OR checker: a crashed
+    # maker becomes MakerOutput(ok=False) (no-progress, so a crashed maker can never
+    # complete), and a crashed checker becomes CheckerOutput(verdict=Verdict.FAIL) — a
+    # crash is NEVER promoted to success. An agent that wraps the maker/checker call in
+    # `except ...: return ... ok=True` (swallow a maker crash and claim progress,
+    # fail-open) or `except ...: return ... Verdict.PASS` (swallow a checker crash and
+    # declare a pass) would register clean on every existing principle — none anchors
+    # loop_runner. It must be pinned; otherwise that "crash-swallowed-as-success"
+    # regression (CWE-703: improper check of exceptional conditions) goes unregistered.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-13"), None)
+    assert p is not None, "SEC-13 must pin the goal-loop maker/checker crash fail-closed boundary"
+    assert p.anchor == "src/goal_loop/loop_runner.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-13 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-13 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
