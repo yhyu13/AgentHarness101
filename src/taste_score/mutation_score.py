@@ -24,14 +24,15 @@ Name-returned (``constant-hidden``) one, the top-level HELPER-CALL (``helper-hid
 (``return _always(...)``), the ATTRIBUTE/METHOD-CALL (``attribute-hidden``) one
 (``return self._always(...)`` / ``return _Helper().always(...)``), the bare ATTRIBUTE VALUE
 (``attr-value-hidden``) one (``return self._ALWAYS`` where ``_ALWAYS = True`` in the class body),
-and — this fire — the CONSTRUCTOR-BOUND INSTANCE ATTRIBUTE (``instance-attr-hidden``) one
-(``return self._ALWAYS`` where ``_ALWAYS = True`` in ``def __init__``), which the resolver now traces
-into the constructor assignment. The current residual headroom is ``inst-attr-mutator-hidden``: a
-constant returned through an INSTANCE attribute bound in a NON-``__init__`` mutator method
-(``self._ALWAYS = True`` inside ``_setup()``, read in ``check()``) that the resolver only proves for a
-NAME / a top-level helper CALL / a bound-method CALL / a class-body attribute VALUE / an
-``__init__``-bound instance attribute, so it still blesses. Each ratchet step is: catch this level,
-add a subtler one.
+the CONSTRUCTOR-BOUND INSTANCE ATTRIBUTE (``instance-attr-hidden``) one
+(``return self._ALWAYS`` where ``_ALWAYS = True`` in ``def __init__``), the NON-``__init__``
+MUTATOR-BOUND one (``inst-attr-mutator-hidden``, ``self._setup()`` then ``return self._ALWAYS``),
+the FACTORY-FUNCTION one (``factory-hidden``, ``_make().val``), and — this fire — the NESTED-FACTORY
+one (``nested-factory-hidden``, ``_make()`` returns ``_build()`` and the guard reads ``_make().val``),
+which the resolver now follows to the base builder that directly constructs the class. The current
+residual headroom is ``static-factory-hidden``: a constant returned through an instance reached by a
+FACTORY METHOD (``_Helper.create().val``), whose return type the module-level factory-chain resolver does
+not trace. Each ratchet step is: catch this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -427,6 +428,57 @@ def _nested_factory_hidden(token: str) -> str:
     )
 
 
+def _static_factory_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a FACTORY METHOD
+    (``_Helper.create().val``): the resolver follows a chain of module-level factory FUNCTIONS to the
+    base builder that directly constructs the class, but it does NOT trace a class-level factory METHOD
+    (a ``@staticmethod``/``@classmethod`` call is a bound-method expression, not a ``_Cls(...)``
+    construction or a module-level helper), so the read is not proven a constant and the guard still
+    blesses. The 'add a subtler mutant' ratchet once ``nested-factory-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @staticmethod\n"
+            "    def create():\n"
+            "        h = _Helper()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper.create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @staticmethod\n"
+            "    def create():\n"
+            "        h = " + sym + "()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    def check(self, action):\n"
+            "        return " + sym + ".create()._ALWAYS\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @staticmethod\n"
+        "    def create():\n"
+        "        h = _Helper()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _Helper.create().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -495,6 +547,11 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # untracked and the read stays non-constant: the honest residual headroom once factory-hidden is
         # caught.
         MutantCase("nested-factory-hidden", _nested_factory_hidden(tok), False),
+        # A pass-through whose constant is read on an instance reached through a FACTORY METHOD
+        # (_Helper.create().val) — the resolver follows a chain of module-level factory FUNCTIONS to the
+        # base builder, but does NOT trace a @staticmethod/classmethod factory's return type, so the read
+        # stays non-constant: the honest residual headroom once nested-factory-hidden is caught.
+        MutantCase("static-factory-hidden", _static_factory_hidden(tok), False),
     ]
 
 

@@ -274,18 +274,24 @@ def _instance_receiver_class(
 def _factory_return_class(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     classes: dict[str, ast.ClassDef],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+    _depth: int = 0,
 ) -> ast.ClassDef | None:
     """The single class a pure-constructor factory returns, or ``None``.
 
     A factory that does ``h = _Cls(...); return h`` (or ``return _Cls(...)``) returns ONE statically
     known class. A factory that returns a parameter, an arbitrary expression, or different classes in
     different branches stays ``None`` so a genuinely dynamic factory is never over-resolved (which would
-    let a real factory-returned guard be misjudged inert)."""
+    let a real factory-returned guard be misjudged inert). A factory that DELEGATES to another factory
+    (``return _build()``) is followed to the base builder that constructs the class. ``_depth`` caps the
+    (theoretical) mutual-factory recursion so an outlandish ``a()->b()->a()`` cannot hang the detector."""
+    if _depth > 8:
+        return None
     locals_map = _named_local_classes(fn, classes)
     returns = _collect_returns_of(fn)
     found: ast.ClassDef | None = None
     for r in returns:
-        c = _return_expr_class(r.value, locals_map, classes)
+        c = _return_expr_class(r.value, locals_map, classes, sources or {}, _depth)
         if c is None:
             return None
         if found is not None and c is not found:
@@ -298,10 +304,20 @@ def _return_expr_class(
     expr: ast.AST,
     locals_map: dict[str, ast.ClassDef],
     classes: dict[str, ast.ClassDef],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+    _depth: int = 0,
 ) -> ast.ClassDef | None:
-    """The class an expression constructs: a direct ``_Cls(...)`` call, or a local name bound to one."""
-    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in classes:
-        return classes[expr.func.id]
+    """The class an expression constructs: a direct ``_Cls(...)`` call, a local name bound to one, or —
+    now — a call to a module-level FACTORY whose single statically-known return class it resolves
+    (following a factory chain, so ``return _build()`` resolves to the builder's class). ``None`` means
+    the expression could not be tied to a single statically-known class."""
+    if _depth > 8:
+        return None
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
+        if expr.func.id in classes:
+            return classes[expr.func.id]
+        if sources and expr.func.id in sources:
+            return _factory_return_class(sources[expr.func.id], classes, sources, _depth + 1)
     if isinstance(expr, ast.Name) and expr.id in locals_map:
         return locals_map[expr.id]
     return None
@@ -311,12 +327,17 @@ def _factory_receiver(
     value: ast.AST,
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
+    _depth: int = 0,
 ) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
-    """``(class, factory_fn)`` for a ``_make().attr`` receiver, or ``(None, None)``.
+    """``(class, base_factory_fn)`` for a ``_make().attr`` receiver, or ``(None, None)``.
 
-    ``value`` is a call to a module-level factory that provably constructs and returns ONE class; the
-    returned ``factory_fn`` is the enclosing context to use for the mutator look, because the mutator
-    that binds the constant is called inside the factory body, not the guard."""
+    ``value`` is a call to a module-level factory. A factory may DELEGATE to another factory
+    (``_make()`` returns ``_build()``): the resolver walks the chain to the BASE builder that directly
+    constructs the class, because the mutator that binds the constant is called in that base builder's
+    body, not in the delegating wrapper. ``_depth`` caps mutual-factory recursion (an outlandish
+    ``def _a(): return _b(); def _b(): return _a()`` cannot hang the detector)."""
+    if _depth > 8:
+        return None, None
     if not (
         isinstance(value, ast.Call)
         and isinstance(value.func, ast.Name)
@@ -325,7 +346,13 @@ def _factory_receiver(
     ):
         return None, None
     fn = sources[value.func.id]
-    cls = _factory_return_class(fn, classes)
+    # A delegating factory (the return expr is itself a factory call) — recurse to the base builder first.
+    for r in _collect_returns_of(fn):
+        sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+        if sub[0] is not None:
+            return sub
+    # Not a delegation; this factory directly constructs the class (or is not a resolvable factory).
+    cls = _factory_return_class(fn, classes, sources, _depth)
     return (cls, fn) if cls is not None else (None, None)
 
 
@@ -735,7 +762,7 @@ def _returns_inert_instance(
     """True iff ``expr`` constructs (or is a local name bound to) an instance of a FULLY-INERT class —
     a pure factory-ship of an inert shell, which contributes no real guard logic."""
     locals_map = _named_local_classes(fn, classes)
-    cls = _return_expr_class(expr, locals_map, classes)
+    cls = _return_expr_class(expr, locals_map, classes, sources)
     if cls is None:
         return False
     return _class_is_fully_inert(cls, env, helpers, sources, classes, _depth=_depth + 1)
