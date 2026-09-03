@@ -276,6 +276,8 @@ def _factory_return_class(
     classes: dict[str, ast.ClassDef],
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
     _depth: int = 0,
+    cls_class: ast.ClassDef | None = None,
+    cls_name: str | None = None,
 ) -> ast.ClassDef | None:
     """The single class a pure-constructor factory returns, or ``None``.
 
@@ -283,15 +285,19 @@ def _factory_return_class(
     known class. A factory that returns a parameter, an arbitrary expression, or different classes in
     different branches stays ``None`` so a genuinely dynamic factory is never over-resolved (which would
     let a real factory-returned guard be misjudged inert). A factory that DELEGATES to another factory
-    (``return _build()``) is followed to the base builder that constructs the class. ``_depth`` caps the
-    (theoretical) mutual-factory recursion so an outlandish ``a()->b()->a()`` cannot hang the detector."""
+    (``return _build()``) is followed to the base builder that constructs the class. A ``@classmethod``
+    factory that builds via ``cls()`` resolves to ``cls_class`` (the class it is called on). ``_depth``
+    caps the (theoretical) mutual-factory recursion so an outlandish ``a()->b()->a()`` cannot hang the
+    detector."""
     if _depth > 8:
         return None
-    locals_map = _named_local_classes(fn, classes)
+    locals_map = _named_local_classes(fn, classes, cls_class, cls_name)
     returns = _collect_returns_of(fn)
     found: ast.ClassDef | None = None
     for r in returns:
-        c = _return_expr_class(r.value, locals_map, classes, sources or {}, _depth)
+        c = _return_expr_class(
+            r.value, locals_map, classes, sources or {}, _depth, cls_class, cls_name
+        )
         if c is None:
             return None
         if found is not None and c is not found:
@@ -306,18 +312,25 @@ def _return_expr_class(
     classes: dict[str, ast.ClassDef],
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
     _depth: int = 0,
+    cls_class: ast.ClassDef | None = None,
+    cls_name: str | None = None,
 ) -> ast.ClassDef | None:
     """The class an expression constructs: a direct ``_Cls(...)`` call, a local name bound to one, or —
     now — a call to a module-level FACTORY whose single statically-known return class it resolves
     (following a factory chain, so ``return _build()`` resolves to the builder's class). ``None`` means
-    the expression could not be tied to a single statically-known class."""
+    the expression could not be tied to a single statically-known class. ``cls_class``/``cls_name`` carry
+    the ``@classmethod`` receiver (a ``cls()`` construction resolves to the class the factory is called on)."""
     if _depth > 8:
         return None
     if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
         if expr.func.id in classes:
             return classes[expr.func.id]
+        if cls_class is not None and cls_name is not None and expr.func.id == cls_name:
+            return cls_class
         if sources and expr.func.id in sources:
-            return _factory_return_class(sources[expr.func.id], classes, sources, _depth + 1)
+            return _factory_return_class(
+                sources[expr.func.id], classes, sources, _depth + 1, cls_class, cls_name
+            )
     if isinstance(expr, ast.Name) and expr.id in locals_map:
         return locals_map[expr.id]
     return None
@@ -399,6 +412,15 @@ def _sibling_method_factory_receiver(
     return (class_def, method) if ret_cls is not None else (None, None)
 
 
+def _is_classmethod(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True iff a method is decorated ``@classmethod`` (its first arg is the class receiver)."""
+    return any(
+        (isinstance(d, ast.Name) and d.id == "classmethod")
+        or (isinstance(d, ast.Attribute) and d.attr == "classmethod")
+        for d in fn.decorator_list
+    )
+
+
 def _class_factory_receiver(
     value: ast.AST,
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
@@ -439,7 +461,12 @@ def _class_factory_receiver(
         if sub[0] is not None:
             return sub
     # Not a delegation; this method directly constructs the class (or is not a resolvable factory).
-    ret_cls = _factory_return_class(method, classes, sources, _depth)
+    # A `@classmethod` factory builds via `cls()` — the first-arg name of a classmethod IS the class it is
+    # called on, so resolve that construction back to `cls` (the receiver class named on the call site).
+    cls_name: str | None = None
+    if _is_classmethod(method) and method.args.args:
+        cls_name = method.args.args[0].arg
+    ret_cls = _factory_return_class(method, classes, sources, _depth, cls, cls_name)
     return (cls, method) if ret_cls is not None else (None, None)
 
 
@@ -469,8 +496,12 @@ def _is_instance_receiver(
 def _named_local_classes(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     classes: dict[str, ast.ClassDef],
+    cls_class: ast.ClassDef | None = None,
+    cls_name: str | None = None,
 ) -> dict[str, ast.ClassDef]:
-    """Map a local name to the class it is constructed from by a plain ``x = _Cls(...)`` assignment."""
+    """Map a local name to the class it is constructed from by a plain ``x = _Cls(...)`` assignment (or
+    a ``@classmethod``'s ``x = cls()``, which resolves to ``cls_class`` — the class the factory is called
+    on)."""
     out: dict[str, ast.ClassDef] = {}
     for stmt in fn.body:
         if (
@@ -479,9 +510,18 @@ def _named_local_classes(
             and isinstance(stmt.targets[0], ast.Name)
             and isinstance(stmt.value, ast.Call)
             and isinstance(stmt.value.func, ast.Name)
-            and stmt.value.func.id in classes
+            and (
+                stmt.value.func.id in classes
+                or (
+                    cls_class is not None
+                    and cls_name is not None
+                    and stmt.value.func.id == cls_name
+                )
+            )
         ):
-            out[stmt.targets[0].id] = classes[stmt.value.func.id]
+            out[stmt.targets[0].id] = (
+                classes[stmt.value.func.id] if stmt.value.func.id in classes else cls_class
+            )
     return out
 
 
@@ -616,7 +656,12 @@ def _resolve_attribute_value_constant(
         target_class, factory_fn = _factory_receiver(val, sources, classes)
         if factory_fn is not None and target_class is not None:
             enclosing = factory_fn
-            receiver_locals = _named_local_classes(factory_fn, classes)
+            # A `@classmethod` factory builds its instance via `cls()`; thread the receiver class so the
+            # mutator that binds the constant (called inside the factory body) is found on `target_class`.
+            cls_name: str | None = None
+            if _is_classmethod(factory_fn) and factory_fn.args.args:
+                cls_name = factory_fn.args.args[0].arg
+            receiver_locals = _named_local_classes(factory_fn, classes, target_class, cls_name)
     if target_class is None:
         return False, None
     for stmt in target_class.body:
@@ -866,9 +911,14 @@ def _returns_inert_instance(
 
     ``enclosing_class`` is the class ``fn`` is a method of (``current_class`` from the parent), so a
     delegation whose return expr is a bare-Name call to a SIBLING method (``create()`` returns ``_build()``)
-    is followed to the class it builds; a module-level function has ``None`` here and skips that branch."""
-    locals_map = _named_local_classes(fn, classes)
-    cls = _return_expr_class(expr, locals_map, classes, sources)
+    is followed to the class it builds; a module-level function has ``None`` here and skips that branch.
+    When ``fn`` is a ``@classmethod`` of ``enclosing_class``, its ``cls()`` construction resolves to
+    ``enclosing_class`` (the class the factory is called on)."""
+    cls_name: str | None = None
+    if enclosing_class is not None and _is_classmethod(fn) and fn.args.args:
+        cls_name = fn.args.args[0].arg
+    locals_map = _named_local_classes(fn, classes, enclosing_class, cls_name)
+    cls = _return_expr_class(expr, locals_map, classes, sources, 0, enclosing_class, cls_name)
     if cls is None and enclosing_class is not None:
         # A delegation whose return expr is a bare-Name call to a SIBLING METHOD of ``enclosing_class``
         # (``create()`` returns ``_build()``, both ``@staticmethod``) is neither a module-level function

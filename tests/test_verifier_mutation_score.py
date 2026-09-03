@@ -363,9 +363,24 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(classmethod_sf.text)  # valid Python
         run_cm = TraceabilityVerifier.classify(p.pattern, p.violations, classmethod_sf.text, p.id)
-        assert run_cm.did_expand is True, (
+        assert run_cm.did_expand is False, (
             f"{p.id} classmethod-cls-factory-hidden fake (constant reached through a @classmethod factory "
-            f"that builds via the cls receiver) is the new honest residual headroom and must still bless"
+            f"that builds via the cls receiver) must now be rejected — the resolver traces a classmethod "
+            f"factory's ``cls()`` construction back to the receiver class"
+        )
+        nested_cm = next(
+            c for c in mutant_cases(p) if c.label == "nested-classmethod-cls-factory-hidden"
+        )
+        assert re.search(p.pattern, nested_cm.text), (
+            f"{p.id} nested-classmethod-cls-factory-hidden fake must carry the pattern, "
+            f"got {nested_cm.text!r}"
+        )
+        ast.parse(nested_cm.text)  # valid Python
+        run_ncm = TraceabilityVerifier.classify(p.pattern, p.violations, nested_cm.text, p.id)
+        assert run_ncm.did_expand is True, (
+            f"{p.id} nested-classmethod-cls-factory-hidden fake (constant reached through a classmethod "
+            f"factory that DELEGATES to a sibling classmethod) is the new honest residual headroom and "
+            f"must still bless"
         )
 
 
@@ -610,15 +625,17 @@ def test_nested_static_factory_indirect_attr_constant_is_now_rejected() -> None:
     assert run.safe is True
 
 
-def test_classmethod_cls_factory_indirect_attr_constant_remains_headroom() -> None:
+def test_classmethod_cls_factory_is_now_rejected_and_nested_is_headroom() -> None:
     """A constant reached through a CLASSMETHOD factory that builds via the ``cls`` receiver
     (``SafetyGuard.create()`` does ``h = cls(); h._setup(); return h``, the guard reads
-    ``SafetyGuard.create()._ALWAYS``) is the NEW honest residual headroom: the resolver traces a class-level
-    factory method only when its body DIRECTLY constructs a module-level class (``SafetyGuard()``/``h =
-    SafetyGuard()``); a ``cls()`` construction is a runtime-parameter receiver it cannot tie to a class, so
-    the read is not proven a constant and the guard still blesses. It carries the pattern, valid Python."""
+    ``SafetyGuard.create()._ALWAYS``) is NOW CAUGHT: the resolver traces a classmethod factory's ``cls()``
+    construction back to the receiver class (the ``cls`` first-arg of a ``@classmethod`` IS the class it is
+    called on), so the inert pass-through no longer blesses. The honest residual headroom moved one ratchet
+    step deeper to a classmethod factory that DELEGATES to a SIBLING classmethod (``create()`` returns
+    ``_build()``, both ``@classmethod``) — that delegation is not followed, so ``create``'s return class is
+    untracked and the read stays non-constant: the guard still blesses. Carries the pattern, valid Python."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
-    guard = (
+    direct = (
         "class SafetyGuard:\n"
         "    def _setup(self):\n"
         "        self._ALWAYS = True\n"
@@ -630,11 +647,55 @@ def test_classmethod_cls_factory_indirect_attr_constant_remains_headroom() -> No
         "    def check(self, action):\n"
         "        return SafetyGuard.create()._ALWAYS\n"
     )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, direct, p.id)
+    assert run.did_expand is False, (
+        "a constant reached through a @classmethod factory that builds via the cls receiver must now be "
+        "rejected (the resolver traces the cls() construction back to the receiver class)"
+    )
+    assert run.safe is True
+    nested = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def _build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return _build()\n"
+        "    def check(self, action):\n"
+        "        return SafetyGuard.create()._ALWAYS\n"
+    )
+    run_nested = TraceabilityVerifier.classify(p.pattern, p.violations, nested, p.id)
+    assert run_nested.did_expand is True, (
+        "a constant reached through a classmethod factory that delegates to a sibling classmethod is the new "
+        "honest residual headroom (the cls() receiver is not threaded through the classmethod delegation chain)"
+    )
+    assert run_nested.safe is True
+
+
+def test_classmethod_factory_returning_cls_directly_is_rejected() -> None:
+    """A classmethod factory that returns a DIRECT ``cls()`` construction (``return cls()`` with no local
+    assignment) is an inert pass-through when the built class's attribute is a provable constant: the
+    resolver resolves a bare ``cls()`` call back to the receiver class, so the constant read is caught. This
+    covers the direct-construction edge (a real ``return cls()`` classmethod factory) which the
+    ``h = cls(); return h`` shape does not exercise."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    _ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return cls()\n"
+        "    def check(self, action):\n"
+        "        return SafetyGuard.create()._ALWAYS\n"
+    )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, (
-        "a constant reached through a @classmethod factory that builds via the cls receiver is the honest "
-        "residual headroom (a cls() construction is a runtime-parameter receiver the analyzer cannot tie "
-        "to a class)"
+    assert run.did_expand is False, (
+        "a constant reached through a @classmethod factory that returns a DIRECT cls() construction must "
+        "be rejected (the resolver resolves a bare cls() call to the receiver class)"
     )
     assert run.safe is True
 

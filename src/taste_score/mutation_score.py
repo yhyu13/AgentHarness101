@@ -599,6 +599,67 @@ def _classmethod_cls_factory_hidden(token: str) -> str:
     )
 
 
+def _nested_classmethod_cls_factory_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+    DELEGATES to a SIBLING CLASSMETHOD (``_Helper.create()`` returns ``_build()``, both ``@classmethod``,
+    and the guard reads ``_Helper.create().val``): the resolver now follows a classmethod factory directly
+    (``h = cls()`` resolves back to the receiver class) but does NOT thread the ``cls`` receiver through a
+    classmethod→classmethod DELEGATION chain, so a ``create()`` that returns ``_build()`` loses track of the
+    ``cls()`` construction inside ``_build`` and the read is not proven a constant. The 'add a subtler
+    mutant' ratchet once ``classmethod-cls-factory-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def _build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return _build()\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper.create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def _build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return _build()\n"
+            "    def check(self, action):\n"
+            f"        return {sym}.create()._ALWAYS\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def _build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return _build()\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _Helper.create().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -679,11 +740,21 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("nested-static-factory-hidden", _nested_static_factory_hidden(tok), False),
         # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
         # builds via the `cls` receiver (_Helper.create().val where create is @classmethod, doing
-        # h = cls(); h._setup(); return h) — the resolver traces a class-level factory method only when it
-        # DIRECTLY constructs a module-level class (_Helper()/h = _Helper()); a `cls()` construction is a
-        # runtime-parameter receiver it cannot tie to a class, so the read stays non-constant: the honest
-        # residual headroom once nested-static-factory-hidden is caught.
+        # h = cls(); h._setup(); return h) — now CAUGHT: the resolver traces a class-level factory method's
+        # `cls()` construction back to the receiver class (the `cls` param of a @classmethod IS the receiver
+        # class the factory is called on).
         MutantCase("classmethod-cls-factory-hidden", _classmethod_cls_factory_hidden(tok), False),
+        # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+        # DELEGATES to a SIBLING CLASSMETHOD (_Helper.create() returns _build(); guard reads
+        # _Helper.create().val) — the resolver now follows a classmethod factory directly but does NOT
+        # thread the `cls` receiver through a classmethod→classmethod DELEGATION chain, so a create() that
+        # returns _build() loses track of the cls() construction inside _build and the read stays
+        # non-constant: the honest residual headroom once classmethod-cls-factory-hidden is caught.
+        MutantCase(
+            "nested-classmethod-cls-factory-hidden",
+            _nested_classmethod_cls_factory_hidden(tok),
+            False,
+        ),
     ]
 
 
