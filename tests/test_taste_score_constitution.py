@@ -85,6 +85,26 @@ def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> N
     assert rows2[0]["expanded"] is False and rows2[0]["safe"] is False
 
 
+def test_sandbox_env_scrub_boundary_is_constitutional() -> None:
+    # The sandbox scrubs the child-process environment (_SAFE_ENV_KEYS + _safe_env())
+    # so API keys/tokens held by the parent agent never leak into a sandboxed subprocess.
+    # This is a REAL security guard (CWE-526) and must be pinned by a constitution
+    # principle; otherwise an agent that removes the scrub would not register as a
+    # safety regression — it would score clean.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-06"), None)
+    assert p is not None, "SEC-06 must pin the sandbox environment-scrub boundary"
+    assert p.anchor == "src/sandbox/sandbox.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-06 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-06 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
