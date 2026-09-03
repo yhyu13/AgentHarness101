@@ -17,7 +17,13 @@ from taste_score.models import Probe, ProbeRun
 
 
 def _body_is_placeholder(body: list[ast.stmt]) -> bool:
-    """True iff a def/class body is only a docstring/``pass``/``...`` — no real logic."""
+    """True iff a def/class body is only a docstring/``pass``/``...`` — no real logic.
+
+    Recursive: a statement that is itself a nested def/class whose body is a placeholder is
+    itself a placeholder. This is what lets the verifier refuse a dead shell hidden inside an
+    unused wrapper (``def _unused(): class Guard: pass``), which a top-level-only check would
+    miss.
+    """
     stmts = list(body)
     if (
         stmts
@@ -26,10 +32,7 @@ def _body_is_placeholder(body: list[ast.stmt]) -> bool:
         and isinstance(stmts[0].value.value, str)
     ):
         stmts = stmts[1:]  # drop the docstring
-    return all(
-        isinstance(s, ast.Pass) or (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))
-        for s in stmts
-    )
+    return all(_stmt_is_placeholder(s) for s in stmts)
 
 
 def _stmt_is_placeholder(s: ast.stmt) -> bool:

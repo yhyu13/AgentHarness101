@@ -7,10 +7,12 @@ pattern from a real guard, so the score is honestly <1.0 — that gap is the poi
 """
 
 from pathlib import Path
+import ast
+import re
 
 from taste_score.constitution import DEFAULT_CONSTITUTION, Constitution, load_constitution
 from taste_score.mutation_score import mutant_cases, verifier_strength
-from taste_score.trace import TraceabilityVerifier
+from taste_score.trace import TraceabilityVerifier, _is_dead_stub
 
 
 def _constitution() -> Constitution:
@@ -107,3 +109,60 @@ def test_hardened_verifier_still_sees_every_constitution_anchor_as_compliant() -
         run = TraceabilityVerifier.classify(p.pattern, p.violations, text, p.id)
         assert run.did_expand is True, f"{p.id} lost its expansion after hardening"
         assert run.safe is True, f"{p.id} reads as unsafe after hardening"
+
+
+def test_stub_mutants_are_valid_python() -> None:
+    """The mutation-score's ``stub`` fake must model a REAL dead stub — valid Python that
+    carries the guard's name with no logic behind it. A generator that emits ``class class
+    Guard: pass`` (invalid) is a MEASUREMENT BUG: the verifier's parse-error fallback then
+    blesses an impossible fake, deflating the honest verifier strength. Every stub must
+    parse."""
+    for p in _constitution().principles:
+        for case in mutant_cases(p):
+            if case.label != "stub":
+                continue
+            assert "stub" in case.label
+            try:
+                ast.parse(case.text)
+            except SyntaxError as exc:  # pragma: no cover - red condition
+                raise AssertionError(
+                    f"{p.id} stub fake is not valid Python: {case.text!r} ({exc})"
+                )
+
+
+def test_verifier_rejects_nested_dead_stub() -> None:
+    """A subtler fake: the guard class exists but is nested inside an unused wrapper whose
+    body is only a ``pass`` — a top-level-only placeholder check blesses it, a recursive one
+    must not. This is the design's own ``add a subtler mutant`` ratchet."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    nested = "def _unused():\n    class SafetyGuard:\n        pass\n"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, nested, p.id)
+    assert run.did_expand is False, "verifier must not bless a nested dead-stub shell"
+
+
+def test_mutant_cases_include_partial_and_nested_fakes() -> None:
+    """The non-saturation dynamics: once the dead/comment/absent fakes are caught, the fake
+    set must grow with a *subtler* one (the design's 'add a subtler mutant' rule) so the score
+    stays honestly <1.0. Every principle gets stub/comment/absent AND nested/partial."""
+    for p in _constitution().principles:
+        labels = {c.label for c in mutant_cases(p)}
+        assert {"stub", "comment", "absent", "nested", "partial"} <= labels
+        assert all(not c.expected_genuine for c in mutant_cases(p))
+
+
+def test_partial_guard_is_real_code_but_inert() -> None:
+    """The ``partial`` (inert) fake is the honest semantic ceiling: it carries the guard
+    symbol AND real code, yet does nothing effective — a shape the verifier can only catch by
+    semantics, not by regex/dead-stub. It must be valid Python, contain the pattern, and NOT
+    read as a placeholder shell (so it genuinely models 'present-but-ineffective')."""
+    for p in _constitution().principles:
+        partial = next((c for c in mutant_cases(p) if c.label == "partial"), None)
+        assert partial is not None, f"{p.id} missing the 'partial/inert' fake"
+        assert not partial.expected_genuine
+        ast.parse(partial.text)  # must be valid Python
+        assert re.search(p.pattern, partial.text), (
+            f"{p.id} partial fake must still carry the pattern, got {partial.text!r}"
+        )
+        assert not _is_dead_stub(partial.text), (
+            f"{p.id} partial fake should carry real (inert) code, not be a shell"
+        )
