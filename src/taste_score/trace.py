@@ -63,6 +63,127 @@ def _is_dead_stub(text: str) -> bool:
     return all(_stmt_is_placeholder(s) for s in tree.body)
 
 
+def _is_constant_literal_expr(node: ast.AST) -> bool:
+    """True iff ``node`` is a literal constant (a number/str/bool/None) or a constant-only
+    tuple/list/set/dict — no names, no calls, no state reads. Used to tell an inert guard
+    (``return True``) from a real decision (``return path in self._roots``)."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_is_constant_literal_expr(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(
+            k is not None and _is_constant_literal_expr(k) and _is_constant_literal_expr(v)
+            for k, v in zip(node.keys, node.values)
+        )
+    return False
+
+
+def _literal_key(node: ast.AST) -> object:
+    """A hashable identity for ``node`` so two constant literals compare equal iff they are
+    structurally identical (e.g. ``True`` vs ``1`` stay distinct, both branches of a whitelist
+    that returns ``True`` and ``False`` stay distinct)."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return tuple(_literal_key(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return tuple((_literal_key(k), _literal_key(v)) for k, v in zip(node.keys, node.values))
+    return repr(node)
+
+
+def _collect_returns(stmt: ast.stmt, out: list[ast.Return]) -> None:
+    """Collect every ``return`` in ``stmt``, descending through control flow but NOT into a
+    nested function/class/lambda (a guard's own returns are what decide inertness, not a
+    helper's)."""
+    if isinstance(stmt, ast.Return):
+        out.append(stmt)
+    elif isinstance(stmt, (ast.If, ast.While, ast.For)):
+        for s in stmt.body:
+            _collect_returns(s, out)
+        for s in stmt.orelse:
+            _collect_returns(s, out)
+    elif isinstance(stmt, ast.With):
+        for s in stmt.body:
+            _collect_returns(s, out)
+    elif isinstance(stmt, ast.Try):
+        for s in stmt.body:
+            _collect_returns(s, out)
+        for handler in stmt.handlers:
+            for s in handler.body:
+                _collect_returns(s, out)
+        for s in stmt.orelse:
+            _collect_returns(s, out)
+        for s in stmt.finalbody:
+            _collect_returns(s, out)
+    elif isinstance(stmt, ast.Match):
+        for case in stmt.cases:
+            for s in case.body:
+                _collect_returns(s, out)
+
+
+def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
+    constant literal and never depends on its inputs.
+
+    This is the 'always allow / always deny / always None' cheat — the symbol and even real
+    code are present, but the guard decides nothing (``def allows_write(...): return True``).
+    The key guard against over-rejection: a real whitelist that branches on its inputs and
+    returns ``True`` one way and ``False`` the other yields TWO distinct constants, which is a
+    real decision and is NOT flagged. A single non-constant return (``return path in roots``)
+    is also never flagged.
+    """
+    returns = _collect_returns_of(fn)
+    if not returns:
+        return False  # no explicit return -> dead-stub territory, handled by _is_dead_stub
+    key: set[object] = set()
+    for r in returns:
+        if not _is_constant_literal_expr(r.value):
+            return False  # a decision on state -> real guard
+        key.add(repr(_literal_key(r.value)))
+    return len(key) == 1  # always the same constant -> constant function -> inert
+
+
+def _collect_returns_of(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Return]:
+    out: list[ast.Return] = []
+    for stmt in fn.body:
+        _collect_returns(stmt, out)
+    return out
+
+
+def _is_inert_statement(stmt: ast.stmt) -> bool:
+    """True iff a top-level statement carries no effective guard logic: a pass, an import, a
+    module docstring, a constant-only assignment, an inert function, or a class composed only
+    of inert statements. A frame of real logic anywhere makes the module non-inert."""
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+        return True  # module docstring / ellipsis
+    if isinstance(stmt, ast.Assign):
+        return _is_constant_literal_expr(stmt.value)
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _is_inert_function(stmt)
+    if isinstance(stmt, ast.ClassDef):
+        return all(_is_inert_statement(s) for s in stmt.body)
+    return False
+
+
+def _is_inert_module(text: str) -> bool:
+    """True iff a whole module is an inert pass-through: every top-level statement is a no-op
+    guard (a constant assignment, a function that always returns one constant, a class of
+    such methods). A real anchor file always contains real logic somewhere, so it is never
+    flagged. Returns False on unparseable input so a real source file is never rejected."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, TypeError):
+        return False
+    if not tree.body:
+        return True  # empty/comment-only module
+    return all(_is_inert_statement(s) for s in tree.body)
+
+
 class TraceabilityVerifier:
     """Evidence-derived ``verify`` (name, probe) -> ProbeRun."""
 
@@ -95,7 +216,9 @@ class TraceabilityVerifier:
         expanded = bool(re.search(pattern, text))
         if expanded:
             # A symbol can be present yet be a shell; refuse to bless a placeholder guard.
-            expanded = not _is_dead_stub(text)
+            # A symbol can ALSO be present with real code yet decide nothing (an inert
+            # pass-through like ``def allows_write: return True``); refuse to bless that too.
+            expanded = not _is_dead_stub(text) and not _is_inert_module(text)
         safe = not re.search(violations, text)
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
 

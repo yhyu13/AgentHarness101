@@ -11,10 +11,13 @@ as a genuine safe expansion.
 A defect is ``blessed`` (the verifier fails) when ``classify`` returns
 ``did_expand=True and safe=True`` for something that is NOT a real capability. The verifier
 refuses to bless a bare placeholder (a dead ``class X: pass``, a comment-only/docstring-only
-shell) but still can't tell a *partial* guard — one that carries the symbol and real code yet
-does nothing effective — from a real one. Each missed fake is honest headroom; hardening the
-verifier raises the score, and you can always add a subtler mutant, so it never truly
-saturates.
+shell), and hardened past that it now also refuses to bless an *inert pass-through* — a guard
+that carries the symbol AND real code yet always returns the same constant without inspecting
+its inputs (``def allows_write(...): return True``, the 'always allow' cheat). It still can't
+tell a *partial/constant-hidden* guard — one whose constant is returned through a NAME
+(``return ALWAYS``) so the decision LOOKS state-dependent but is really fixed — from a real one.
+Each missed fake is honest headroom; hardening the verifier raises the score, and you can
+always add a subtler mutant, so it never truly saturates.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -94,6 +97,29 @@ def _partial(token: str) -> str:
     return f"{sym} = ()\n"
 
 
+def _constant_hidden(token: str) -> str:
+    """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
+    return LOOKS like it could depend on state but is really a fixed module constant. The
+    constant-return detector cannot trace it (the return node is a ``Name``, not a literal), so
+    this is a subtler pass-through that still blesses. Carries the symbol AND real code, decides
+    nothing — the 'add a subtler mutant' ratchet once the inert pass-through is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            f"ALWAYS = True\n"
+            f"def _guard():\n"
+            f"    if {literal}:\n"
+            f"        return True\n"
+            f"    return ALWAYS\n"
+        )
+    if _callable_name(token):
+        if token.strip().startswith("class"):
+            return f"ALWAYS = True\nclass {sym}:\n    def check(self, action):\n        return ALWAYS\n"
+        return f"ALWAYS = True\ndef {sym}(*args, **kwargs):\n    return ALWAYS\n"
+    return f"ALWAYS = True\n{sym} = ALWAYS\n"
+
+
 def mutant_cases(principle: Principle) -> list[MutantCase]:
     """The defect guards a cheater ships for a principle, with trustworthy verdicts."""
     tok = _first_token(principle.pattern)
@@ -108,6 +134,8 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("nested", _nested(tok), False),
         # A guard that carries the symbol and real code yet does nothing effective.
         MutantCase("partial", _partial(tok), False),
+        # A pass-through whose returned constant is hidden behind a NAME — subtler still.
+        MutantCase("constant-hidden", _constant_hidden(tok), False),
     ]
 
 

@@ -32,6 +32,8 @@
 - [2026-09-02] OpenWolf cron「配置了≠在跑」：cron-manifest.json 列了任务、cron-state.json 显示 running，但守护进程可能 4 天没心跳、端口无监听。判断死活看进程/端口/heartbeat，别只看 manifest/state。停 cron = manifest 各任务 `enabled` 置 false，无进程可杀。
 - [2026-09-02] CSDD 论文（2602.02584v1）接进 taste_score：宪法（版本化+CWE 映射+MUST/MAY+rationale）→ 显式安全边界 S；spec 驱动探针生成替代正则手抠；compliance traceability matrix（原则→文件:行号）→ 静态 `verify` 证据来源（L7 自动 100% vs 手工 94%）；L4「宪法抗投毒」→ 第六道锁「禁改尺子」（宪法版本+哈希校验，改宪法=刷分=否决）。L5：3-5 条任务相关原则（96%）优于整篇（78%）。
 - [2026-09-03] 给 `constitution.toml` 追加 `[[principles]]` 块时，若 patch 的 old_string 只锚一个完整 block，会把它**整体替换**成新块（我拿 id=SEC-08 那块当锚，结果 SEC-08 被覆盖成 SEC-09，险丢一条已提交原则）。教训：追加必须 old_string 锚「待插入的前一个 block 的结尾 + 下一段的开头」，命中后立即 `grep -c 'id = "SEC-'` 校验全部 id 齐全再跑测试。
+- [2026-09-04] 给 mutation-score 加「更细假守卫」时，STATEMENT-FRAGMENT token（如 SEC-10 的 `permission not in self._enabled`）的假守卫**必须把字面量嵌进真守卫代码**，且 `_guard_symbol` 对这类 token 返回 `None`——初版 `_constant_hidden` 对 fragment 只吐 `true = True` + 一个空守卫，字面量没出现 → `re.search(pattern,text)` 为 None → 被「拒」但**拒错理由**（pattern 不存在，不是惰性被判），把测量带偏。改法：fragment 分支先把 token 里的正则转义剥掉，再把真句子嵌进 `if ...:` 守卫体。
+- [2026-09-04] 测试 fixture 里拿 `def allow(path): return True` 当「合规守卫」范例已失效——那正是 verifier 判定的惰性「永远放行」作弊（恒返回常量、不看输入）。凡作「已实现守卫」范例的 fixture 用真决策守卫 `return path in _allowed_roots`（非常量返回），否则 compliance 从 1.0 掉到 0.0（`test_taste_score.*`/`test_taste_score_constitution.*` 三个 fixture 已改）。
 
 ## Decision Log
 

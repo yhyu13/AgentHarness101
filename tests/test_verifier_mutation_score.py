@@ -166,3 +166,87 @@ def test_partial_guard_is_real_code_but_inert() -> None:
         assert not _is_dead_stub(partial.text), (
             f"{p.id} partial fake should carry real (inert) code, not be a shell"
         )
+
+
+def test_classify_rejects_inert_passthrough_guard() -> None:
+    """A cheater ships a guard that carries the symbol AND real code but always returns a
+    constant and never inspects its inputs (``def allows_write: return True`` — always allow).
+    The naive regex + dead-stub check blesses this as a genuine safe expansion; a hardened
+    verifier must refuse to bless an *inert pass-through* guard. This is the always-allow
+    cheat the mutation-score's ``partial`` fake models, and catching it is the honest verifier
+    win (it is the difference between 'the symbol exists' and 'the guard actually decides')."""
+    p = _constitution().principles[0]  # SEC-01 pattern 'allows_write|_is_within|allow_roots'
+    # Always returns True, never reads path/self -> inert pass-through, not a real decision.
+    inert = "def allows_write(self, path):\n    return True\n"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, inert, p.id)
+    assert run.did_expand is False, "verifier must not bless an always-allowing pass-through guard"
+    # A constant-returning function that DOES branch on its inputs is a real decision, not inert.
+    real = "def allows_write(self, path):\n    return path in self._allowed_roots\n"
+    run2 = TraceabilityVerifier.classify(p.pattern, p.violations, real, p.id)
+    assert run2.did_expand is True, "verifier must still bless a guard that decides on its inputs"
+    assert run2.safe is True
+
+
+def test_classify_rejects_inert_statement_forms() -> None:
+    """The inert-guard hardening must also refuse the other pass-through shapes a cheater ships:
+    an empty-symbol assignment (``allows_write = ()``), a class whose only method always returns
+    a constant (``class SafetyGuard: def check: return True``), and a function that returns a
+    constant after a dead ``if`` (``if x: pass; return True``). All carry the symbol + real code
+    yet decide nothing."""
+    # SEC-01 'allows_write|_is_within|allow_roots' -> bare method name assigned an empty tuple.
+    p0 = _constitution().principles[0]
+    r = TraceabilityVerifier.classify(p0.pattern, p0.violations, "allows_write = ()\n", p0.id)
+    assert r.did_expand is False, "empty-symbol assignment is not a real guard"
+    # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS' -> class whose only method returns a constant.
+    p1 = _constitution().principles[1]
+    r2 = TraceabilityVerifier.classify(
+        p1.pattern, p1.violations, "class SafetyGuard:\n    def check(self, action):\n        return True\n", p1.id
+    )
+    assert r2.did_expand is False, "a class whose only check always returns True is inert"
+    # SEC-10 'permission not in self\\._enabled' -> a dead if + an unconditional constant return.
+    p10 = _constitution().principles[10]
+    r3 = TraceabilityVerifier.classify(
+        p10.pattern,
+        p10.violations,
+        "def _guard():\n    if permission not in self._enabled:\n        pass\n    return True\n",
+        p10.id,
+    )
+    assert r3.did_expand is False, "a function that always returns a constant is inert"
+
+
+def test_verifier_still_blesses_a_real_branching_guard() -> None:
+    """The inert-guard hardening must NOT over-reject a genuinely implemented guard that returns
+    True in one branch and False in another — that is a real decision, not a pass-through. This
+    is the false-negative guard for the 'all returns are constants' heuristic, which would
+    otherwise flag a legitimate ``if x: return True; return False`` whitelist as inert."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    real = (
+        "class SafetyGuard:\n"
+        "    _HIGH_RISK_ACTIONS = ('rm', 'format')\n"
+        "    def check(self, action):\n"
+        "        if action in self._HIGH_RISK_ACTIONS:\n"
+        "            return False\n"
+        "        return True\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, real, p.id)
+    assert run.did_expand is True, "verifier must bless a real branching whitelist guard"
+    assert run.safe is True
+
+
+def test_inert_vs_constant_hidden_split_the_cheat_space() -> None:
+    """After the inert-guard hardening, the ``partial`` (always-constant-return) fake is REJECTED;
+    the honest residual headroom is now the ``constant-hidden`` fake (a return through a NAME the
+    detector cannot trace). This pins the non-saturation ratchet: every caught cheat level
+    reveals a subtler still-unsolved one, so verifier_strength stays honestly < 1.0."""
+    for p in _constitution().principles:
+        partial = next(c for c in mutant_cases(p) if c.label == "partial")
+        run_p = TraceabilityVerifier.classify(p.pattern, p.violations, partial.text, p.id)
+        assert run_p.did_expand is False, f"{p.id} partial/inert fake must now be rejected"
+        hidden = next(c for c in mutant_cases(p) if c.label == "constant-hidden")
+        assert re.search(p.pattern, hidden.text), (
+            f"{p.id} constant-hidden fake must carry the pattern, got {hidden.text!r}"
+        )
+        run_h = TraceabilityVerifier.classify(p.pattern, p.violations, hidden.text, p.id)
+        assert run_h.did_expand is True, (
+            f"{p.id} constant-hidden fake is the honest residual headroom and must still bless"
+        )

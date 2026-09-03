@@ -183,7 +183,7 @@ def test_traceability_verifier_uses_evidence_not_self_report(tmp_path: Path) -> 
     from taste_score.trace import TraceabilityVerifier
 
     target = tmp_path / "guard.py"
-    target.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    target.write_text("def allow(path):\n    return path in _allowed_roots\n", encoding="utf-8")
     princ = Principle(id="SEC-01", boundary="b", cwe="CWE-22", level="MUST",
                       constraint="c", anchor=str(target), pattern="def allow",
                       violations="write_text", rationale="r")

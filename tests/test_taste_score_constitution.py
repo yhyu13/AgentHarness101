@@ -118,7 +118,7 @@ def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> N
     from taste_score.trace import TraceabilityVerifier
 
     ok = tmp_path / "guard.py"
-    ok.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    ok.write_text("def allow(path):\n    return path in _allowed_roots\n", encoding="utf-8")
     princ = Principle(id="SEC-01", boundary="sandbox 文件写隔离", cwe="CWE-22",
                       level="MUST", constraint="白名单判定", anchor=str(ok),
                       pattern="def allow", violations="write_text", rationale="r")
@@ -282,7 +282,7 @@ def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -
     from taste_score.trace import TraceabilityVerifier
 
     guard = tmp_path / "guard.py"
-    guard.write_text("def allow(path):\n    return True\n", encoding="utf-8")
+    guard.write_text("def allow(path):\n    return path in _allowed_roots\n", encoding="utf-8")
     princ = Principle(id="SEC-01", boundary="文件写隔离", cwe="CWE-22", level="MUST",
                       constraint="白名单", anchor=str(guard), pattern="def allow",
                       violations="write_text", rationale="r")
