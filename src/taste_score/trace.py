@@ -331,29 +331,72 @@ def _factory_receiver(
 ) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
     """``(class, base_factory_fn)`` for a ``_make().attr`` receiver, or ``(None, None)``.
 
-    ``value`` is a call to a module-level factory. A factory may DELEGATE to another factory
-    (``_make()`` returns ``_build()``): the resolver walks the chain to the BASE builder that directly
-    constructs the class, because the mutator that binds the constant is called in that base builder's
-    body, not in the delegating wrapper. ``_depth`` caps mutual-factory recursion (an outlandish
-    ``def _a(): return _b(); def _b(): return _a()`` cannot hang the detector)."""
+    ``value`` is a call to a module-level factory FUNCTION (``_make()``) or a class-level factory METHOD
+    (``_Helper.create()``). A factory may DELEGATE to another factory — a module function (``_make()``
+    returns ``_build()``) or a method (``_Helper.create()`` returns ``_build()``): the resolver walks the
+    chain to the BASE builder that directly constructs the class, because the mutator that binds the
+    constant is called in that base builder's body, not in the delegating wrapper. A method factory is
+    reached through a ``@staticmethod``/``@classmethod`` (``_Helper.create()`` is a bound-method
+    expression, not a ``_Cls(...)`` construction), which the module-function-only resolver never saw.
+    ``_depth`` caps mutual-factory recursion (an outlandish ``def _a(): return _b()`` cannot hang the
+    detector)."""
     if _depth > 8:
         return None, None
-    if not (
-        isinstance(value, ast.Call)
-        and isinstance(value.func, ast.Name)
-        and sources
-        and value.func.id in sources
-    ):
+    if not isinstance(value, ast.Call):
         return None, None
-    fn = sources[value.func.id]
-    # A delegating factory (the return expr is itself a factory call) — recurse to the base builder first.
-    for r in _collect_returns_of(fn):
+    f = value.func
+    # A module-level factory FUNCTION, ``_make()``.
+    if isinstance(f, ast.Name) and sources and f.id in sources:
+        fn = sources[f.id]
+        # A delegating factory (the return expr is itself a factory call) — recurse to the base builder first.
+        for r in _collect_returns_of(fn):
+            sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+            if sub[0] is not None:
+                return sub
+        # Not a delegation; this factory directly constructs the class (or is not a resolvable factory).
+        cls = _factory_return_class(fn, classes, sources, _depth)
+        return (cls, fn) if cls is not None else (None, None)
+    # A class-level factory METHOD, ``_Helper.create()`` (staticmethod/classmethod receiver).
+    if isinstance(f, ast.Attribute):
+        return _class_factory_receiver(value, sources, classes, _depth)
+    return None, None
+
+
+def _class_factory_receiver(
+    value: ast.AST,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    _depth: int = 0,
+) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
+    """``(class, factory_method)`` for a class-level factory METHOD receiver (``_Helper.create()``).
+
+    ``value`` is a call whose ``.func`` is an attribute on a bare class name (``_Helper.create()``): the
+    resolver ties it to the class the method is defined on, then traces the method's single statically-known
+    return class (following a method→method or method→module-function delegation chain to the BASE builder,
+    so ``create()`` delegating to ``_build()`` resolves to whatever ``_build`` constructs). Returns the class
+    the factory builds AND the factory method (as the enclosing context for the mutator look, since the
+    mutator that binds the constant is called inside the factory method's body). ``None`` means the receiver
+    could not be statically tied to a single known-return class. ``_depth`` caps mutual-factory recursion."""
+    if _depth > 8:
+        return None, None
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)):
+        return None, None
+    recv = value.func.value
+    if not (isinstance(recv, ast.Name) and recv.id in classes):
+        return None, None
+    cls = classes[recv.id]
+    method = _find_method(cls, value.func.attr)
+    if method is None:
+        return None, None
+    # A delegating factory method (its return expr is itself a factory call, method or module fn) —
+    # recurse to the base builder first, so ``create()`` returning ``_build()`` resolves to ``_build``'s class.
+    for r in _collect_returns_of(method):
         sub = _factory_receiver(r.value, sources, classes, _depth + 1)
         if sub[0] is not None:
             return sub
-    # Not a delegation; this factory directly constructs the class (or is not a resolvable factory).
-    cls = _factory_return_class(fn, classes, sources, _depth)
-    return (cls, fn) if cls is not None else (None, None)
+    # Not a delegation; this method directly constructs the class (or is not a resolvable factory).
+    ret_cls = _factory_return_class(method, classes, sources, _depth)
+    return (cls, method) if ret_cls is not None else (None, None)
 
 
 def _is_instance_receiver(
@@ -509,11 +552,12 @@ def _resolve_attribute_value_constant(
     method the same function CALLS that binds ``<attr>`` to a single provable constant.
 
     Anti-over-rejection: only resolves when the attribute is bound to a PROVABLE constant literal we
-    can statically see (class body, ``__init__``, or a called mutator). An attribute carrying a real
-    decision (a ``Compare`` like ``path in roots`` is a different node, never here), bound from an
-    argument, reassigned, or reached through a factory function (``_make().val``) is NOT resolved — so a
-    real guard is never flagged. ``enclosing_fn``/``locals_map`` let the mutator look see which method a
-    guard actually calls on the receiver.
+    can statically see (class body, ``__init__``, a called mutator, or a receiver reached through a factory
+    FUNCTION or a class-level factory METHOD whose single known-return class we can trace). An attribute
+    carrying a real decision (a ``Compare`` like ``path in roots`` is a different node, never here), bound
+    from an argument, reassigned, or reached through a factory whose return type cannot be tied to a single
+    class is NOT resolved — so a real guard is never flagged. ``enclosing_fn``/``locals_map`` let the mutator
+    look see which method a guard actually calls on the receiver.
     """
     attr = node.attr
     val = node.value
@@ -736,16 +780,28 @@ def _class_is_fully_inert(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     _depth: int = 0,
+    _visiting: frozenset[str] = frozenset(),
 ) -> bool:
     """True iff every member of a class is an inert statement — a shell class whose methods only set /
     return constants and decide nothing. A real guard (a method that branches on its inputs) is NOT
     fully-inert, so a factory returning such an instance never resolves to a constant. ``_depth`` caps
     the (theoretical) self-referential-class recursion so an outlandish ``class C: def make(): return
-    C()`` cannot hang the detector."""
+    C()`` cannot hang the detector.
+
+    ``_visiting`` carries the classes currently being checked so a static/class METHOD factory that lives
+    *inside* the class it constructs (``class C: @staticmethod def make(): return C()``) is resolved
+    coinductively: re-entering a class already assumed inert proves the factory member inert, rather than
+    snapping to "not-inert" via the depth cap. A genuine state-deciding member still returns False, so the
+    assumption never blesses a real guard."""
     if _depth > 8:
         return False
+    if class_def.name in _visiting:
+        return True  # coinductive: a self-referential factory builds an assumed-inert class
+    _visiting = _visiting | {class_def.name}
     return all(
-        _is_inert_statement(s, env, helpers, sources, classes, class_def, _depth=_depth)
+        _is_inert_statement(
+            s, env, helpers, sources, classes, class_def, _depth=_depth, _visiting=_visiting
+        )
         for s in class_def.body
     )
 
@@ -758,6 +814,7 @@ def _returns_inert_instance(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     _depth: int = 0,
+    _visiting: frozenset[str] = frozenset(),
 ) -> bool:
     """True iff ``expr`` constructs (or is a local name bound to) an instance of a FULLY-INERT class —
     a pure factory-ship of an inert shell, which contributes no real guard logic."""
@@ -765,7 +822,9 @@ def _returns_inert_instance(
     cls = _return_expr_class(expr, locals_map, classes, sources)
     if cls is None:
         return False
-    return _class_is_fully_inert(cls, env, helpers, sources, classes, _depth=_depth + 1)
+    return _class_is_fully_inert(
+        cls, env, helpers, sources, classes, _depth=_depth + 1, _visiting=_visiting
+    )
 
 
 def _is_inert_function(
@@ -776,6 +835,7 @@ def _is_inert_function(
     classes: dict[str, ast.ClassDef],
     current_class: ast.ClassDef | None,
     _depth: int = 0,
+    _visiting: frozenset[str] = frozenset(),
 ) -> bool:
     """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
     constant literal and never depends on its inputs.
@@ -805,7 +865,9 @@ def _is_inert_function(
         # is ``__init__`` (implicitly returns None, so the old branch said 'not inert') would poison the
         # whole module and let the constructor-bound instance-attribute cheat slip through.
         return all(
-            _is_inert_statement(s, env, helpers, sources, classes, current_class, _depth=_depth)
+            _is_inert_statement(
+                s, env, helpers, sources, classes, current_class, _depth=_depth, _visiting=_visiting
+            )
             for s in fn.body
         )
     locals_map = _named_local_classes(fn, classes)
@@ -825,7 +887,9 @@ def _is_inert_function(
         if not ok:
             # A pure factory-ship of an inert class is itself inert, so a factory that only builds an
             # inert shell does not un-poison the module's inertness.
-            if _returns_inert_instance(r.value, fn, env, helpers, sources, classes, _depth=_depth):
+            if _returns_inert_instance(
+                r.value, fn, env, helpers, sources, classes, _depth=_depth, _visiting=_visiting
+            ):
                 key.add("inert-instance")
                 continue
             return False  # a decision on state -> real guard
@@ -848,6 +912,7 @@ def _is_inert_statement(
     classes: dict[str, ast.ClassDef],
     current_class: ast.ClassDef | None,
     _depth: int = 0,
+    _visiting: frozenset[str] = frozenset(),
 ) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
     module docstring, a constant-only assignment, an inert function, or a class composed only
@@ -868,11 +933,14 @@ def _is_inert_statement(
         return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return _is_inert_function(
-            stmt, env, helpers, sources, classes, current_class, _depth=_depth
+            stmt, env, helpers, sources, classes, current_class, _depth=_depth, _visiting=_visiting
         )
     if isinstance(stmt, ast.ClassDef):
+        class_visiting = _visiting | {stmt.name}
         return all(
-            _is_inert_statement(s, env, helpers, sources, classes, stmt, _depth=_depth)
+            _is_inert_statement(
+                s, env, helpers, sources, classes, stmt, _depth=_depth, _visiting=class_visiting
+            )
             for s in stmt.body
         )
     return False

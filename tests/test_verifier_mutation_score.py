@@ -244,11 +244,13 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     returned through an instance attribute bound in a NON-``__init__`` mutator that the guard CALLS,
     ``self._setup()`` then ``return self._ALWAYS``) — the resolver now traces a mutator called in the
     same function that binds the attribute to a single provable constant. It also traces a factory that
-    returns a fully-inert mutated instance (``factory-hidden``) AND a factory that DELEGATES to a
-    base builder (``nested-factory-hidden``), following the factory chain to the constructor. The honest
-    residual headroom moved one ratchet step deeper to ``static-factory-hidden`` (a constant reached
-    through a ``@staticmethod``/``@classmethod`` factory, ``_Helper.create().val``, whose return type the
-    resolver does not trace). Each caught cheat level reveals a subtler still-unsolved one, so
+    returns a fully-inert mutated instance (``factory-hidden``), a factory that DELEGATES to a
+    base builder (``nested-factory-hidden``), AND a class-level factory METHOD (``static-factory-hidden``,
+    ``_Helper.create().val``), following the factory chain to the constructor. The honest
+    residual headroom moved one ratchet step deeper to ``nested-static-factory-hidden`` (a constant reached
+    through a factory method that delegates to ANOTHER factory method on the same class,
+    ``_Helper.create()`` returns ``_build()``, whose method→method delegation chain the resolver does not
+    trace). Each caught cheat level reveals a subtler still-unsolved one, so
     verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
     for p in _constitution().principles:
         partial = next(c for c in mutant_cases(p) if c.label == "partial")
@@ -338,10 +340,19 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(static_factory.text)  # valid Python
         run_sf = TraceabilityVerifier.classify(p.pattern, p.violations, static_factory.text, p.id)
-        assert run_sf.did_expand is True, (
+        assert run_sf.did_expand is False, (
             f"{p.id} static-factory-hidden fake (constant reached through a @staticmethod/classmethod "
-            f"factory, whose return type the resolver does not trace) is the honest residual headroom "
-            f"and must still bless"
+            f"factory whose return class the resolver now traces) must now be rejected"
+        )
+        nested_sf = next(c for c in mutant_cases(p) if c.label == "nested-static-factory-hidden")
+        assert re.search(p.pattern, nested_sf.text), (
+            f"{p.id} nested-static-factory-hidden fake must carry the pattern, got {nested_sf.text!r}"
+        )
+        ast.parse(nested_sf.text)  # valid Python
+        run_nsf = TraceabilityVerifier.classify(p.pattern, p.violations, nested_sf.text, p.id)
+        assert run_nsf.did_expand is True, (
+            f"{p.id} nested-static-factory-hidden fake (constant reached through a factory method that "
+            f"delegates to another factory method) is the honest residual headroom and must still bless"
         )
 
 
@@ -527,12 +538,14 @@ def test_nested_factory_indirect_attr_constant_is_now_rejected() -> None:
     )
 
 
-def test_static_factory_indirect_attr_constant_remains_headroom() -> None:
-    """The NEW residual headroom is a factory reached through a ``@staticmethod``/``@classmethod``
-    (``_Helper.create().val``): the resolver traces a factory FUNCTION chain to a base builder that
-    directly constructs the class, but it does NOT trace a class-level factory METHOD (a method call is
-    not a ``_Cls(...)`` construction or a module-level function), so the read is not proven a constant
-    and the guard still blesses honestly. It carries the pattern, valid Python."""
+def test_static_factory_indirect_attr_constant_is_now_rejected() -> None:
+    """A constant returned through an INSTANCE attribute reached through a FACTORY METHOD
+    (``SafetyGuard.create()._ALWAYS``, where ``create`` is a ``@staticmethod`` that builds and returns a
+    fully-inert ``SafetyGuard``) is an inert pass-through: always the same constant, never inspects its
+    inputs. The resolver now traces a class-level factory METHOD's single statically-known return class
+    (following a method→method delegation chain) and resolves the attribute constant through the mutator
+    the method CALLS, so this guard is flagged inert and NOT blessed. Closes the ``static-factory-hidden``
+    residual headroom."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -547,9 +560,64 @@ def test_static_factory_indirect_attr_constant_remains_headroom() -> None:
         "        return SafetyGuard.create()._ALWAYS\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "attribute bound through a class-level factory-method receiver (fully-inert class) is an inert "
+        "pass-through and must now be rejected"
+    )
+    assert run.safe is True
+
+
+def test_nested_static_factory_indirect_attr_constant_remains_headroom() -> None:
+    """A constant reached through a factory method that DELEGATES to ANOTHER factory method on the same
+    class (``SafetyGuard.create()`` returns ``_build()``, and the guard reads ``SafetyGuard.create()._ALWAYS``)
+    is the NEW honest residual headroom: the resolver traces a class-level factory method one level deep
+    (a direct construction) but does NOT follow a method→method delegation chain, so the base builder's
+    return class is untracked, the read is not proven a constant, and the guard still blesses. It carries
+    the pattern, valid Python."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @staticmethod\n"
+        "    def _build():\n"
+        "        h = SafetyGuard()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @staticmethod\n"
+        "    def create():\n"
+        "        return _build()\n"
+        "    def check(self, action):\n"
+        "        return SafetyGuard.create()._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
     assert run.did_expand is True, (
-        "a constant reached through a @staticmethod/classmethod factory is the honest residual headroom "
-        "(the resolver does not trace a class-level factory method's return type)"
+        "a constant reached through a factory method that delegates to another factory method is the "
+        "honest residual headroom (the resolver does not trace a method→method factory delegation chain)"
+    )
+    assert run.safe is True
+
+
+def test_static_factory_that_decides_on_state_is_still_blessed() -> None:
+    """Anti-over-rejection: a real guard that reads an attribute off a static-factory-returned instance
+    where the built guard genuinely DECIDES on state (``check`` returns ``path in roots``, a non-constant)
+    is a real decision, not a pass-through. The resolver refuses to prove a constant (the class is not
+    fully-inert, and the attribute is never bound to a single constant), so the guard stays blessed."""
+    p = _constitution().principles[0]  # SEC-01 'allows_write|_is_within|allow_roots'
+    guard = (
+        "class _Guard:\n"
+        "    _allowed_roots = ('/a', '/b')\n"
+        "    def allows_write(self, path):\n"
+        "        return path in self._allowed_roots\n"
+        "    @staticmethod\n"
+        "    def create():\n"
+        "        return _Guard()\n"
+        "def allows_write(self, path):\n"
+        "    return _Guard.create().allows_write(path)\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a static-factory-returned instance that genuinely decides on state must stay a real guard"
     )
     assert run.safe is True
 
