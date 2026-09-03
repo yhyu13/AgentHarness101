@@ -233,20 +233,30 @@ def test_verifier_still_blesses_a_real_branching_guard() -> None:
     assert run.safe is True
 
 
-def test_inert_vs_constant_hidden_split_the_cheat_space() -> None:
-    """After the inert-guard hardening, the ``partial`` (always-constant-return) fake is REJECTED;
-    the honest residual headroom is now the ``constant-hidden`` fake (a return through a NAME the
-    detector cannot trace). This pins the non-saturation ratchet: every caught cheat level
-    reveals a subtler still-unsolved one, so verifier_strength stays honestly < 1.0."""
+def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> None:
+    """After the constant-hidden hardening, the ``constant-hidden`` fake (a constant returned
+    through a NAME, ``return ALWAYS``) is REJECTED; the honest residual headroom moved one ratchet
+    step deeper to ``helper-hidden`` (a constant returned through a HELPER CALL the detector cannot
+    trace). Each caught cheat level reveals a subtler still-unsolved one, so verifier_strength
+    stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
     for p in _constitution().principles:
         partial = next(c for c in mutant_cases(p) if c.label == "partial")
         run_p = TraceabilityVerifier.classify(p.pattern, p.violations, partial.text, p.id)
-        assert run_p.did_expand is False, f"{p.id} partial/inert fake must now be rejected"
+        assert run_p.did_expand is False, f"{p.id} partial/inert fake must be rejected"
         hidden = next(c for c in mutant_cases(p) if c.label == "constant-hidden")
         assert re.search(p.pattern, hidden.text), (
             f"{p.id} constant-hidden fake must carry the pattern, got {hidden.text!r}"
         )
         run_h = TraceabilityVerifier.classify(p.pattern, p.violations, hidden.text, p.id)
-        assert run_h.did_expand is True, (
-            f"{p.id} constant-hidden fake is the honest residual headroom and must still bless"
+        assert run_h.did_expand is False, (
+            f"{p.id} constant-hidden fake (return through a NAME) must now be rejected"
+        )
+        helper = next(c for c in mutant_cases(p) if c.label == "helper-hidden")
+        assert re.search(p.pattern, helper.text), (
+            f"{p.id} helper-hidden fake must carry the pattern, got {helper.text!r}"
+        )
+        ast.parse(helper.text)  # valid Python
+        run_g = TraceabilityVerifier.classify(p.pattern, p.violations, helper.text, p.id)
+        assert run_g.did_expand is True, (
+            f"{p.id} helper-hidden fake is the honest residual headroom and must still bless"
         )

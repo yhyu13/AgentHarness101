@@ -14,10 +14,15 @@ refuses to bless a bare placeholder (a dead ``class X: pass``, a comment-only/do
 shell), and hardened past that it now also refuses to bless an *inert pass-through* — a guard
 that carries the symbol AND real code yet always returns the same constant without inspecting
 its inputs (``def allows_write(...): return True``, the 'always allow' cheat). It still can't
-tell a *partial/constant-hidden* guard — one whose constant is returned through a NAME
-(``return ALWAYS``) so the decision LOOKS state-dependent but is really fixed — from a real one.
+It still can't tell a *partial/constant-hidden* guard — one whose constant is returned through a
+NAME (``return ALWAYS``) so the decision LOOKS state-dependent but is really fixed — from a real one.
 Each missed fake is honest headroom; hardening the verifier raises the score, and you can
 always add a subtler mutant, so it never truly saturates.
+
+The inert-guard hardening has already caught the literal-return (``partial``) pass-through and the
+Name-returned (``constant-hidden``) one. The current residual headroom is ``helper-hidden``: a
+guard whose constant comes back through a *helper call* (``return _always(...)``), which the
+constant-return detector cannot trace. Each ratchet step is: catch this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -97,6 +102,44 @@ def _partial(token: str) -> str:
     return f"{sym} = ()\n"
 
 
+def _call_constant_hidden(token: str) -> str:
+    """A guard returning its constant through a *helper call* (``return _always(...)``).
+
+    The constant-return detector resolves a returned NAME (``return ALWAYS``) but cannot trace
+    a CALL into a helper that itself returns a constant. So a cheater ships ``_always() -> True``
+    and a guard that delegates to it: the guard carries the symbol AND real code, inspects nothing,
+    always returns True, yet the verifier blesses it. This is the subtler still-unsolved ratchet
+    step once ``constant-hidden`` (Name-returned) is caught. Carries the pattern, valid Python.
+    """
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "def _always():\n"
+            "    return True\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _always()\n"
+        )
+    if _callable_name(token):
+        if token.strip().startswith("class"):
+            return (
+                "def _always(self, action):\n"
+                "    return True\n"
+                f"class {sym}:\n"
+                "    def check(self, action):\n"
+                "        return _always(self, action)\n"
+            )
+        return (
+            "def _always(*args, **kwargs):\n"
+            "    return True\n"
+            f"def {sym}(*args, **kwargs):\n"
+            "    return _always(*args, **kwargs)\n"
+        )
+    return f"def _always():\n    return True\n{sym} = _always()\n"
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -136,6 +179,8 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("partial", _partial(tok), False),
         # A pass-through whose returned constant is hidden behind a NAME — subtler still.
         MutantCase("constant-hidden", _constant_hidden(tok), False),
+        # A pass-through whose constant is returned through a HELPER CALL — subtler than both.
+        MutantCase("helper-hidden", _call_constant_hidden(tok), False),
     ]
 
 

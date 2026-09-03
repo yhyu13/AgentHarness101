@@ -63,33 +63,59 @@ def _is_dead_stub(text: str) -> bool:
     return all(_stmt_is_placeholder(s) for s in tree.body)
 
 
-def _is_constant_literal_expr(node: ast.AST) -> bool:
-    """True iff ``node`` is a literal constant (a number/str/bool/None) or a constant-only
-    tuple/list/set/dict — no names, no calls, no state reads. Used to tell an inert guard
-    (``return True``) from a real decision (``return path in self._roots``)."""
+def _resolve_literal_key(node: ast.AST, env: dict[str, object]) -> tuple[bool, object]:
+    """``(is_constant, key)`` for ``node`` — a hashable identity so two constant literals compare
+    equal iff structurally identical.
+
+    Distinguishes ``True`` from ``1``, keeps both branches of a whitelist constant (``True`` and
+    ``False``) distinct, and — the hardening over a bare literal check — resolves a NAME through
+    the module-constant ``env`` (``return ALWAYS`` where ``ALWAYS = True``) so a constant decision
+    hidden behind a name is no longer read as state-dependent. ``(False, None)`` means non-constant
+    (a real decision on state), which the inert detector treats as a genuine guard.
+    """
     if isinstance(node, ast.Constant):
-        return True
+        return True, node.value
+    if isinstance(node, ast.Name):
+        if node.id in env:
+            return True, env[node.id]
+        return False, None
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-        return all(_is_constant_literal_expr(e) for e in node.elts)
+        keys = []
+        for e in node.elts:
+            ok, k = _resolve_literal_key(e, env)
+            if not ok:
+                return False, None
+            keys.append(k)
+        return True, tuple(keys)
     if isinstance(node, ast.Dict):
-        return all(
-            k is not None and _is_constant_literal_expr(k) and _is_constant_literal_expr(v)
-            for k, v in zip(node.keys, node.values)
-        )
-    return False
+        pairs = []
+        for k, v in zip(node.keys, node.values):
+            if k is None:
+                return False, None
+            ok_k, kk = _resolve_literal_key(k, env)
+            ok_v, kv = _resolve_literal_key(v, env)
+            if not ok_k or not ok_v:
+                return False, None
+            pairs.append((kk, kv))
+        return True, tuple(pairs)
+    return False, None
 
 
-def _literal_key(node: ast.AST) -> object:
-    """A hashable identity for ``node`` so two constant literals compare equal iff they are
-    structurally identical (e.g. ``True`` vs ``1`` stay distinct, both branches of a whitelist
-    that returns ``True`` and ``False`` stay distinct)."""
-    if isinstance(node, ast.Constant):
-        return node.value
-    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-        return tuple(_literal_key(e) for e in node.elts)
-    if isinstance(node, ast.Dict):
-        return tuple((_literal_key(k), _literal_key(v)) for k, v in zip(node.keys, node.values))
-    return repr(node)
+def _module_constants(tree: ast.Module) -> dict[str, object]:
+    """Module-level names bound to a constant literal (or constant tuple/dict), resolved top-down
+    so ``ALWAYS = True; X = ALWAYS`` works. This is what lets the inert detector trace a guard that
+    returns its decision through a NAME (``return ALWAYS``) instead of a literal."""
+    env: dict[str, object] = {}
+    for stmt in tree.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            ok, key = _resolve_literal_key(stmt.value, env)
+            if ok:
+                env[stmt.targets[0].id] = key
+    return env
 
 
 def _collect_returns(stmt: ast.stmt, out: list[ast.Return]) -> None:
@@ -122,7 +148,7 @@ def _collect_returns(stmt: ast.stmt, out: list[ast.Return]) -> None:
                 _collect_returns(s, out)
 
 
-def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef, env: dict[str, object]) -> bool:
     """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
     constant literal and never depends on its inputs.
 
@@ -131,16 +157,18 @@ def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     The key guard against over-rejection: a real whitelist that branches on its inputs and
     returns ``True`` one way and ``False`` the other yields TWO distinct constants, which is a
     real decision and is NOT flagged. A single non-constant return (``return path in roots``)
-    is also never flagged.
+    is also never flagged. ``env`` carries the module-constant names so a constant returned
+    through a NAME (``return ALWAYS``) resolves to its value and is caught.
     """
     returns = _collect_returns_of(fn)
     if not returns:
         return False  # no explicit return -> dead-stub territory, handled by _is_dead_stub
     key: set[object] = set()
     for r in returns:
-        if not _is_constant_literal_expr(r.value):
+        ok, k = _resolve_literal_key(r.value, env)
+        if not ok:
             return False  # a decision on state -> real guard
-        key.add(repr(_literal_key(r.value)))
+        key.add(repr(k))
     return len(key) == 1  # always the same constant -> constant function -> inert
 
 
@@ -151,10 +179,11 @@ def _collect_returns_of(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.
     return out
 
 
-def _is_inert_statement(stmt: ast.stmt) -> bool:
+def _is_inert_statement(stmt: ast.stmt, env: dict[str, object]) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
     module docstring, a constant-only assignment, an inert function, or a class composed only
-    of inert statements. A frame of real logic anywhere makes the module non-inert."""
+    of inert statements. A frame of real logic anywhere makes the module non-inert.
+    ``env`` carries the module-constant names so a constant hidden behind a NAME is traced."""
     if isinstance(stmt, ast.Pass):
         return True
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
@@ -162,11 +191,12 @@ def _is_inert_statement(stmt: ast.stmt) -> bool:
     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
         return True  # module docstring / ellipsis
     if isinstance(stmt, ast.Assign):
-        return _is_constant_literal_expr(stmt.value)
+        ok, _ = _resolve_literal_key(stmt.value, env)
+        return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _is_inert_function(stmt)
+        return _is_inert_function(stmt, env)
     if isinstance(stmt, ast.ClassDef):
-        return all(_is_inert_statement(s) for s in stmt.body)
+        return all(_is_inert_statement(s, env) for s in stmt.body)
     return False
 
 
@@ -181,7 +211,8 @@ def _is_inert_module(text: str) -> bool:
         return False
     if not tree.body:
         return True  # empty/comment-only module
-    return all(_is_inert_statement(s) for s in tree.body)
+    env = _module_constants(tree)
+    return all(_is_inert_statement(s, env) for s in tree.body)
 
 
 class TraceabilityVerifier:
