@@ -127,6 +127,29 @@ def test_command_verifier_safe_shell_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-07 violations sentinel must be absent"
 
 
+def test_sandbox_fail_closed_execution_boundary_is_constitutional() -> None:
+    # SEC-04 pins the CommandPolicy ALLOWLIST *decision* (a pure helper that sandbox.py
+    # does not even import). SEC-06 pins only the environment scrub. NEITHER pins the
+    # actual execution launch point in Sandbox.run — where the fail-closed default-deny
+    # (refuse when no allowlist is configured), the runtime allowlist enforcement, and
+    # the shell=False argv launch actually live. If an agent regressed Sandbox.run to
+    # default-permit (drop the SANDBOX_UNAVAILABLE refuse) or to shell=True, no existing
+    # principle would register it. It must be pinned; otherwise that safety regression
+    # would score clean.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-08"), None)
+    assert p is not None, "SEC-08 must pin the Sandbox fail-closed execution floor"
+    assert p.anchor == "src/sandbox/sandbox.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-08 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-08 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
