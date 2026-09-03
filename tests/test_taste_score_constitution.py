@@ -56,6 +56,36 @@ def test_every_anchor_resolves_and_matches_pattern() -> None:
         )
 
 
+def test_every_anchor_resolves_to_a_tracked_git_file() -> None:
+    # Root cause of the "invented security domain" hole: a principle can anchor a
+    # security guard that only the author has in their *working tree* (a ghost anchor).
+    # ``test_every_anchor_resolves_and_matches_pattern`` above only checks ``exists()``
+    # on disk, so it passes for a file that was never committed — but a fresh checkout
+    # loses the guard, and the whole traceability layer would report it as missing.
+    #
+    # Pin the invariant: every anchor must be TRACKED by git, so the committed tree is
+    # self-consistent and the traceability evidence is reproducible from the commit.
+    import subprocess
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    repo = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+    )
+    if repo.returncode != 0:
+        import pytest
+
+        pytest.skip("not a git checkout — cannot verify anchor tracking")
+    tracked = {line.strip().replace("\\", "/") for line in repo.stdout.splitlines()}
+    for p in c.principles:
+        rel = p.anchor.replace("\\", "/")
+        assert rel in tracked, (
+            f"{p.id} anchors {p.anchor!r} which is NOT tracked by git — a fresh "
+            f"checkout would lose the guard (ghost anchor / invented security domain)"
+        )
+
+
 def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> None:
     # The score's CSDD layer must expose, per principle, the anchor + pattern +
     # whether the implementation evidence is present (did_expand) and clean (safe).
