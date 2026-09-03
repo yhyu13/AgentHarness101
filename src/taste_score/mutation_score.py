@@ -19,10 +19,13 @@ NAME (``return ALWAYS``) so the decision LOOKS state-dependent but is really fix
 Each missed fake is honest headroom; hardening the verifier raises the score, and you can
 always add a subtler mutant, so it never truly saturates.
 
-The inert-guard hardening has already caught the literal-return (``partial``) pass-through and the
-Name-returned (``constant-hidden``) one. The current residual headroom is ``helper-hidden``: a
-guard whose constant comes back through a *helper call* (``return _always(...)``), which the
-constant-return detector cannot trace. Each ratchet step is: catch this level, add a subtler one.
+The inert-guard hardening has already caught the literal-return (``partial``) pass-through, the
+Name-returned (``constant-hidden``) one, and — most recently — the top-level HELPER-CALL
+(``helper-hidden``) one (``return _always(...)``), which the constant-return detector now traces.
+The current residual headroom is ``attribute-hidden``: a constant delegated through an
+attribute/method call (``return self._always()`` / ``_Helper().always()``) that the resolver only
+proves for a plain-``Name`` module-level call, so it still blesses. Each ratchet step is: catch
+this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -105,11 +108,12 @@ def _partial(token: str) -> str:
 def _call_constant_hidden(token: str) -> str:
     """A guard returning its constant through a *helper call* (``return _always(...)``).
 
-    The constant-return detector resolves a returned NAME (``return ALWAYS``) but cannot trace
-    a CALL into a helper that itself returns a constant. So a cheater ships ``_always() -> True``
-    and a guard that delegates to it: the guard carries the symbol AND real code, inspects nothing,
-    always returns True, yet the verifier blesses it. This is the subtler still-unsolved ratchet
-    step once ``constant-hidden`` (Name-returned) is caught. Carries the pattern, valid Python.
+    The constant-return detector resolves a returned NAME (``return ALWAYS``) but (before the
+    helper-call hardening) could not trace a CALL into a helper that itself returns a constant. So
+    a cheater ships ``_always() -> True`` and a guard that delegates to it: the guard carries the
+    symbol AND real code, inspects nothing, always returns True, yet the verifier blesses it. This
+    is the now-CAUGHT ratchet step once ``constant-hidden`` (Name-returned) is caught — the resolver
+    traces a top-level helper call to its constant. Carries the pattern, valid Python.
     """
     sym = _guard_symbol(token)
     if not sym:
@@ -138,6 +142,48 @@ def _call_constant_hidden(token: str) -> str:
             "    return _always(*args, **kwargs)\n"
         )
     return f"def _always():\n    return True\n{sym} = _always()\n"
+
+
+def _attribute_hidden(token: str) -> str:
+    """A guard returning its constant through an *attribute/method call* (``return self._always()``).
+
+    Once the resolver traces a top-level bare-name HELPER CALL, the next honest headroom is a
+    helper reached through an ATTRIBUTE (a method on ``self``/an instance, ``_Helper().always()``).
+    The detector only proves a constant for a plain-``Name`` call to a module-level function, so a
+    constant delegated through ``self._always()``/``_Helper().always()`` STILL blesses — this is the
+    'add a subtler mutant' ratchet once ``helper-hidden`` is caught. Carries the pattern, valid Python.
+    """
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def always(self):\n"
+            "        return True\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper().always()\n"
+        )
+    if _callable_name(token):
+        if token.strip().startswith("class"):
+            return (
+                f"class {sym}:\n"
+                "    def _always(self, action):\n"
+                "        return True\n"
+                "    def check(self, action):\n"
+                "        return self._always(action)\n"
+            )
+        return (
+            "class _Helper:\n"
+            "    def always(self, *args, **kwargs):\n"
+            "        return True\n"
+            f"def {sym}(*args, **kwargs):\n"
+            "    return _Helper().always(*args, **kwargs)\n"
+        )
+    return (
+        f"class _Helper:\n    def always(self):\n        return True\n{sym} = _Helper().always()\n"
+    )
 
 
 def _constant_hidden(token: str) -> str:
@@ -181,6 +227,9 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("constant-hidden", _constant_hidden(tok), False),
         # A pass-through whose constant is returned through a HELPER CALL — subtler than both.
         MutantCase("helper-hidden", _call_constant_hidden(tok), False),
+        # A pass-through whose constant is returned through an ATTRIBUTE/METHOD call — subtler still
+        # (the honest residual headroom once a top-level helper CALL is traced).
+        MutantCase("attribute-hidden", _attribute_hidden(tok), False),
     ]
 
 

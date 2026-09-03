@@ -16,6 +16,11 @@ from taste_score.constitution import Constitution, Principle
 from taste_score.models import Probe, ProbeRun
 
 
+# Sentinel for "a helper could NOT be proven to always return one constant". Distinct from any
+# real value, so `is not` identity works and no constant literal can collide with it.
+_NON_CONSTANT: object = object()
+
+
 def _body_is_placeholder(body: list[ast.stmt]) -> bool:
     """True iff a def/class body is only a docstring/``pass``/``...`` — no real logic.
 
@@ -63,15 +68,28 @@ def _is_dead_stub(text: str) -> bool:
     return all(_stmt_is_placeholder(s) for s in tree.body)
 
 
-def _resolve_literal_key(node: ast.AST, env: dict[str, object]) -> tuple[bool, object]:
+def _resolve_literal_key(
+    node: ast.AST,
+    env: dict[str, object],
+    helpers: dict[str, object] | None = None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+    resolving: frozenset[str] = frozenset(),
+) -> tuple[bool, object]:
     """``(is_constant, key)`` for ``node`` — a hashable identity so two constant literals compare
     equal iff structurally identical.
 
     Distinguishes ``True`` from ``1``, keeps both branches of a whitelist constant (``True`` and
     ``False``) distinct, and — the hardening over a bare literal check — resolves a NAME through
     the module-constant ``env`` (``return ALWAYS`` where ``ALWAYS = True``) so a constant decision
-    hidden behind a name is no longer read as state-dependent. ``(False, None)`` means non-constant
-    (a real decision on state), which the inert detector treats as a genuine guard.
+    hidden behind a name is no longer read as state-dependent. Hardened further: resolves a
+    TOP-LEVEL HELPER CALL (``return _always(...)``) when the helper provably always returns one
+    constant, so a constant hidden behind a helper call is likewise caught. ``(False, None)``
+    means non-constant (a real decision on state), which the inert detector treats as a genuine
+    guard. ``sources`` maps top-level function names to their def; ``helpers`` is the memoised
+    helper→constant cache; ``resolving`` guards recursion cycles. Only a plain-``Name`` call to a
+    top-level helper is traced — an attribute/method call (``self._always()``) or a bare name not
+    in ``sources`` falls back to non-constant, so a real guard that delegates to a *deciding*
+    helper is never over-rejected.
     """
     if isinstance(node, ast.Constant):
         return True, node.value
@@ -79,10 +97,16 @@ def _resolve_literal_key(node: ast.AST, env: dict[str, object]) -> tuple[bool, o
         if node.id in env:
             return True, env[node.id]
         return False, None
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and sources and node.func.id in sources:
+            val = _resolve_function_value(node.func.id, env, helpers, sources, resolving)
+            if val is not _NON_CONSTANT:
+                return True, val
+        return False, None
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         keys = []
         for e in node.elts:
-            ok, k = _resolve_literal_key(e, env)
+            ok, k = _resolve_literal_key(e, env, helpers, sources, resolving)
             if not ok:
                 return False, None
             keys.append(k)
@@ -92,13 +116,68 @@ def _resolve_literal_key(node: ast.AST, env: dict[str, object]) -> tuple[bool, o
         for k, v in zip(node.keys, node.values):
             if k is None:
                 return False, None
-            ok_k, kk = _resolve_literal_key(k, env)
-            ok_v, kv = _resolve_literal_key(v, env)
+            ok_k, kk = _resolve_literal_key(k, env, helpers, sources, resolving)
+            ok_v, kv = _resolve_literal_key(v, env, helpers, sources, resolving)
             if not ok_k or not ok_v:
                 return False, None
             pairs.append((kk, kv))
         return True, tuple(pairs)
     return False, None
+
+
+def _module_callable_sources(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Map of top-level function/async names -> def. Only these (a bare-name call to a module-level
+    helper) are traced by the inert detector; a method or attribute call is not."""
+
+    out: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out[stmt.name] = stmt
+    return out
+
+
+def _resolve_function_value(
+    name: str,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+) -> object:
+    """The single constant value a top-level helper always-returns, or ``_NON_CONSTANT``.
+
+    A helper is pure-constant iff it has at least one ``return`` and EVERY return resolves to the
+    same constant (which may itself flow through another pure-constant helper call). A helper that
+    returns a non-constant (a decision on state) or is in a recursion cycle is ``_NON_CONSTANT``.
+    Results are memoised in ``helpers`` so a shared helper is traced once."""
+
+    if helpers is not None and name in helpers:
+        return helpers[name]
+    fn = sources.get(name)
+    if fn is None:
+        return _NON_CONSTANT
+    if name in resolving:
+        return _NON_CONSTANT  # recursion cycle -> cannot prove a constant
+    resolving = resolving | {name}
+    returns = _collect_returns_of(fn)
+    if not returns:
+        return _NON_CONSTANT
+    seen = []
+    for r in returns:
+        ok, k = _resolve_literal_key(r.value, env, helpers, sources, resolving)
+        if not ok:
+            if helpers is not None:
+                helpers[name] = _NON_CONSTANT
+            return _NON_CONSTANT
+        seen.append(repr(k))
+    if len(set(seen)) != 1:
+        if helpers is not None:
+            helpers[name] = _NON_CONSTANT
+        return _NON_CONSTANT
+    ok, val = _resolve_literal_key(returns[0].value, env, helpers, sources, resolving)
+    result = val if ok else _NON_CONSTANT
+    if helpers is not None:
+        helpers[name] = result
+    return result
 
 
 def _module_constants(tree: ast.Module) -> dict[str, object]:
@@ -148,7 +227,12 @@ def _collect_returns(stmt: ast.stmt, out: list[ast.Return]) -> None:
                 _collect_returns(s, out)
 
 
-def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef, env: dict[str, object]) -> bool:
+def _is_inert_function(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+) -> bool:
     """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
     constant literal and never depends on its inputs.
 
@@ -158,14 +242,16 @@ def _is_inert_function(fn: ast.FunctionDef | ast.AsyncFunctionDef, env: dict[str
     returns ``True`` one way and ``False`` the other yields TWO distinct constants, which is a
     real decision and is NOT flagged. A single non-constant return (``return path in roots``)
     is also never flagged. ``env`` carries the module-constant names so a constant returned
-    through a NAME (``return ALWAYS``) resolves to its value and is caught.
+    through a NAME (``return ALWAYS``) resolves to its value and is caught. ``helpers``/
+    ``sources`` let a constant returned through a top-level HELPER CALL (``return _always()``)
+    be traced to its constant too — so that cheat is caught as well.
     """
     returns = _collect_returns_of(fn)
     if not returns:
         return False  # no explicit return -> dead-stub territory, handled by _is_dead_stub
     key: set[object] = set()
     for r in returns:
-        ok, k = _resolve_literal_key(r.value, env)
+        ok, k = _resolve_literal_key(r.value, env, helpers, sources, frozenset())
         if not ok:
             return False  # a decision on state -> real guard
         key.add(repr(k))
@@ -179,11 +265,17 @@ def _collect_returns_of(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.
     return out
 
 
-def _is_inert_statement(stmt: ast.stmt, env: dict[str, object]) -> bool:
+def _is_inert_statement(
+    stmt: ast.stmt,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
     module docstring, a constant-only assignment, an inert function, or a class composed only
     of inert statements. A frame of real logic anywhere makes the module non-inert.
-    ``env`` carries the module-constant names so a constant hidden behind a NAME is traced."""
+    ``env`` carries the module-constant names so a constant hidden behind a NAME is traced;
+    ``helpers``/``sources`` extend that to a constant hidden behind a HELPER CALL."""
     if isinstance(stmt, ast.Pass):
         return True
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
@@ -191,12 +283,12 @@ def _is_inert_statement(stmt: ast.stmt, env: dict[str, object]) -> bool:
     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
         return True  # module docstring / ellipsis
     if isinstance(stmt, ast.Assign):
-        ok, _ = _resolve_literal_key(stmt.value, env)
+        ok, _ = _resolve_literal_key(stmt.value, env, helpers, sources, frozenset())
         return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _is_inert_function(stmt, env)
+        return _is_inert_function(stmt, env, helpers, sources)
     if isinstance(stmt, ast.ClassDef):
-        return all(_is_inert_statement(s, env) for s in stmt.body)
+        return all(_is_inert_statement(s, env, helpers, sources) for s in stmt.body)
     return False
 
 
@@ -212,7 +304,9 @@ def _is_inert_module(text: str) -> bool:
     if not tree.body:
         return True  # empty/comment-only module
     env = _module_constants(tree)
-    return all(_is_inert_statement(s, env) for s in tree.body)
+    sources = _module_callable_sources(tree)
+    helpers: dict[str, object] = {}
+    return all(_is_inert_statement(s, env, helpers, sources) for s in tree.body)
 
 
 class TraceabilityVerifier:
@@ -248,7 +342,9 @@ class TraceabilityVerifier:
         if expanded:
             # A symbol can be present yet be a shell; refuse to bless a placeholder guard.
             # A symbol can ALSO be present with real code yet decide nothing (an inert
-            # pass-through like ``def allows_write: return True``); refuse to bless that too.
+            # pass-through like ``def allows_write: return True``, or a constant returned
+            # through a NAME ``return ALWAYS``, or through a top-level HELPER CALL
+            # ``return _always()``); refuse to bless that too.
             expanded = not _is_dead_stub(text) and not _is_inert_module(text)
         safe = not re.search(violations, text)
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
