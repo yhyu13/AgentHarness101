@@ -49,9 +49,35 @@ def build_demo_verify() -> object:
     return verify
 
 
-def build_constitution_verify(constitution: object) -> object:
-    """Evidence-derived verify backed by the real constitution (anti-self-report)."""
+def build_constitution_verify(constitution: object) -> TraceabilityVerifier:
+    """Evidence-derived verify backed by the real constitution (anti-self-report).
+
+    Callable as ``verify(name, probe)`` and exposes ``.matrix()`` / ``.compliance()``
+    so the ledger can surface the per-principle traceability matrix and the single-agent
+    cumulative CSDD score.
+    """
     return TraceabilityVerifier(constitution)
+
+
+def make_demo_aware_verify(constitution_verify: TraceabilityVerifier):
+    """Gate-facing compose: rely on the constitution where it has an anchor, else the
+    hostile-honest demo verify.
+
+    Real ``src/`` evidence is authoritative only where a principle is anchored; where the
+    constitution has no anchor (enhancement/red-team/mutated probes) it returns None and
+    we defer to the demo verify so the demo still shows the anti-Goodhart locks — a liar
+    that claims work gets no credit, a reckless expander is Pareto-rejected — instead of
+    all three agents reading as identical.
+    """
+    demo_verify = build_demo_verify()
+
+    def verify(name: str, probe: Probe) -> ProbeRun | None:
+        evidence = constitution_verify.verify(name, probe)
+        if evidence is not None:
+            return evidence
+        return demo_verify(name, probe)
+
+    return verify
 
 
 def rank(
@@ -92,13 +118,16 @@ def compete(
     score_accum = []
     rows: list[dict] = []
     verify = build_constitution_verify(constitution) if constitution is not None else None
+    # Gate uses the constitution where it has evidence, else the hostile-honest demo
+    # verify; the ledger reads the verifier's matrix/compliance directly.
+    gate_verify = make_demo_aware_verify(verify) if verify is not None else None
     pinned = constitution.digest() if constitution is not None else None
     for night in range(nights):
         nseed = seed + night
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
         result = rank(
             build_demo_agents(), golden=golden, mutants=menu,
-            verify=verify, pinned_digest=pinned,
+            verify=gate_verify, pinned_digest=pinned,
         )
         result["night"] = night
         result["seed"] = nseed

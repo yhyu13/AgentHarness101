@@ -26,7 +26,7 @@ from taste_score.models import Probe, ProbeRun, TasteScore
 
 Agent = Callable[[Probe], ProbeRun]
 AgentMap = Mapping[str, Agent]
-Verify = Callable[[str, Probe], ProbeRun]
+Verify = Callable[[str, Probe], ProbeRun | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +61,17 @@ class TasteGate:
                 )
                 for name in agents
             }
-        # A single run resolver: external verify wins over the agent's self-report.
+        # A single run resolver: external verify is authoritative over the agent's
+        # self-report. When verify returns None (no constitutional evidence for this
+        # probe), FAIL CLOSED — never fall back to the agent's own run. "自述不可信":
+        # a liar that self-reports expand+safe on an unanchored probe must get no
+        # credit, not a gift. No proof => no credit, and no safe claim either.
         def run(name: str, probe: Probe) -> ProbeRun:
             if verify is not None:
-                return verify(name, probe)
+                evidence = verify(name, probe)
+                if evidence is not None:
+                    return evidence
+                return ProbeRun(probe.probe_id, did_expand=False, safe=False)
             return agents[name](probe)
 
         runs: dict[str, dict[str, ProbeRun]] = {}

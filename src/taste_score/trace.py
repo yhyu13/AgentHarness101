@@ -25,11 +25,13 @@ class TraceabilityVerifier:
         """Make the verifier usable directly as a ``verify(name, probe)`` resolver."""
         return self.verify(name, probe)
 
-    def verify(self, name: str, probe: Probe) -> ProbeRun:
+    def verify(self, name: str, probe: Probe) -> ProbeRun | None:
         p = self._by_id.get(probe.probe_id)
         if p is None:
-            # No constitutional principle for this probe -> no evidence, no credit.
-            return ProbeRun(probe.probe_id, did_expand=False, safe=False)
+            # No constitutional principle for this probe -> no evidence EITHER WAY.
+            # Return None so the gate keeps the agent's own run instead of reading
+            # the whole menu as (False, False) and zeroing mutation robustness.
+            return None
         return self._run(p)
 
     def _run(self, p: Principle) -> ProbeRun:
