@@ -35,6 +35,7 @@ def test_constitution_digest_is_stable_content_hash() -> None:
 def test_constitution_digest_changes_when_version_changes() -> None:
     import tomllib
     from taste_score.constitution import _from_payload
+
     a = load_constitution(DEFAULT_CONSTITUTION)
     payload = tomllib.loads(DEFAULT_CONSTITUTION.read_text(encoding="utf-8"))
     payload["version"] = "2.0.0"
@@ -55,10 +56,17 @@ def test_constitution_digest_changes_when_principle_content_changes() -> None:
         return Constitution(
             version="1.0.0",
             principles=(
-                Principle(id="SEC-01", boundary="sandbox 文件写隔离", cwe="CWE-22",
-                          level="MUST", constraint="白名单判定",
-                          anchor="src/sandbox/path_policy.py",
-                          pattern="allows_write", violations=violations, rationale="r"),
+                Principle(
+                    id="SEC-01",
+                    boundary="sandbox 文件写隔离",
+                    cwe="CWE-22",
+                    level="MUST",
+                    constraint="白名单判定",
+                    anchor="src/sandbox/path_policy.py",
+                    pattern="allows_write",
+                    violations=violations,
+                    rationale="r",
+                ),
             ),
         )
 
@@ -119,22 +127,38 @@ def test_traceability_matrix_reports_per_principle_evidence(tmp_path: Path) -> N
 
     ok = tmp_path / "guard.py"
     ok.write_text("def allow(path):\n    return path in _allowed_roots\n", encoding="utf-8")
-    princ = Principle(id="SEC-01", boundary="sandbox 文件写隔离", cwe="CWE-22",
-                      level="MUST", constraint="白名单判定", anchor=str(ok),
-                      pattern="def allow", violations="write_text", rationale="r")
+    princ = Principle(
+        id="SEC-01",
+        boundary="sandbox 文件写隔离",
+        cwe="CWE-22",
+        level="MUST",
+        constraint="白名单判定",
+        anchor=str(ok),
+        pattern="def allow",
+        violations="write_text",
+        rationale="r",
+    )
     const = Constitution(version="1.0.0", principles=(princ,))
     rows = TraceabilityVerifier(const).matrix()
     assert rows and rows[0]["id"] == "SEC-01"
     assert rows[0]["anchor"] == str(ok)
     assert rows[0]["pattern"] == "def allow"
-    assert rows[0]["expanded"] is True   # anchor contains the pattern
-    assert rows[0]["safe"] is True       # no violation sentinel
+    assert rows[0]["expanded"] is True  # anchor contains the pattern
+    assert rows[0]["safe"] is True  # no violation sentinel
     assert "level" in rows[0] and "boundary" in rows[0]
 
     # A principle backed by a missing anchor reports no evidence.
-    princ2 = Principle(id="SEC-02", boundary="高危拦截", cwe="CWE-306", level="MUST",
-                       constraint="c", anchor=str(tmp_path / "missing.py"),
-                       pattern="guard", violations="exec", rationale="r")
+    princ2 = Principle(
+        id="SEC-02",
+        boundary="高危拦截",
+        cwe="CWE-306",
+        level="MUST",
+        constraint="c",
+        anchor=str(tmp_path / "missing.py"),
+        pattern="guard",
+        violations="exec",
+        rationale="r",
+    )
     const2 = Constitution(version="1.0.0", principles=(princ2,))
     rows2 = TraceabilityVerifier(const2).matrix()
     assert rows2[0]["expanded"] is False and rows2[0]["safe"] is False
@@ -273,6 +297,32 @@ def test_cost_budget_guard_boundary_is_constitutional() -> None:
     assert not re.search(p.violations, text), "SEC-11 violations sentinel must be absent"
 
 
+def test_world_verifier_fail_closed_boundary_is_constitutional() -> None:
+    # SEC-01..SEC-11 pin the write-isolation / injection / execution / eval / auth /
+    # budget layers; NONE pin the "verify the world" completion boundary. The goal_loop
+    # WorldVerifier.verify_all re-reads artifacts from disk and trusts ONLY those bytes —
+    # never the maker's or checker's self-report ("自述不可信" on the machineside). It fails
+    # closed: any check whose `ok` is False is returned as the failure (a missing or
+    # byte-mismatched artifact is NEVER promoted to success). An agent that wraps the
+    # verification in `except ...: return ... ok=True` (swallow a verify failure and
+    # declare the goal complete, fail-open) would register clean on every existing
+    # principle — none anchors world_verifier. It must be pinned; otherwise that
+    # "false-success" regression (CWE-345: insufficient verification of data authenticity)
+    # goes unregistered.
+    from taste_score.constitution import load_constitution, DEFAULT_CONSTITUTION
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    p = next((p for p in c.principles if p.id == "SEC-12"), None)
+    assert p is not None, "SEC-12 must pin the WorldVerifier fail-closed verify-the-world boundary"
+    assert p.anchor == "src/goal_loop/world_verifier.py"
+    assert p.cwe.startswith("CWE-")
+    anchor = ROOT / p.anchor
+    assert anchor.exists()
+    text = anchor.read_text(encoding="utf-8")
+    assert re.search(p.pattern, text), "SEC-12 pattern must exist in the anchor"
+    assert not re.search(p.violations, text), "SEC-12 violations sentinel must be absent"
+
+
 def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -> None:
     # The single-agent CSDD score: fraction of principles BOTH implemented and clean.
     # Each modification that installs a guard or removes a violation raises it; any
@@ -283,9 +333,17 @@ def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -
 
     guard = tmp_path / "guard.py"
     guard.write_text("def allow(path):\n    return path in _allowed_roots\n", encoding="utf-8")
-    princ = Principle(id="SEC-01", boundary="文件写隔离", cwe="CWE-22", level="MUST",
-                      constraint="白名单", anchor=str(guard), pattern="def allow",
-                      violations="write_text", rationale="r")
+    princ = Principle(
+        id="SEC-01",
+        boundary="文件写隔离",
+        cwe="CWE-22",
+        level="MUST",
+        constraint="白名单",
+        anchor=str(guard),
+        pattern="def allow",
+        violations="write_text",
+        rationale="r",
+    )
     const = Constitution(version="1.0.0", principles=(princ,))
     v = TraceabilityVerifier(const)
     # Fully compliant -> 1.0 (both installed and clean).
