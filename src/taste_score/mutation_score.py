@@ -13,20 +13,23 @@ A defect is ``blessed`` (the verifier fails) when ``classify`` returns
 refuses to bless a bare placeholder (a dead ``class X: pass``, a comment-only/docstring-only
 shell), and hardened past that it now also refuses to bless an *inert pass-through* — a guard
 that carries the symbol AND real code yet always returns the same constant without inspecting
-its inputs (``def allows_write(...): return True``, the 'always allow' cheat). It still can't
-It still can't tell a *partial/constant-hidden* guard — one whose constant is returned through a
-NAME (``return ALWAYS``) so the decision LOOKS state-dependent but is really fixed — from a real one.
-Each missed fake is honest headroom; hardening the verifier raises the score, and you can
-always add a subtler mutant, so it never truly saturates.
+its inputs (``def allows_write(...): return True``, the 'always allow' cheat). Hardening gets
+progressively subtler: a constant returned through a NAME (``return ALWAYS``), a top-level helper call
+(``return _always()``), an attribute/method call (``return self._always()``), then a bare attribute
+value (``return self._ALWAYS``) — each is caught when caught, and each reveals a subtler still-unsolved
+one, so the measure never truly saturates.
 
 The inert-guard hardening has already caught the literal-return (``partial``) pass-through, the
 Name-returned (``constant-hidden``) one, the top-level HELPER-CALL (``helper-hidden``) one
-(``return _always(...)``), and — this fire — the ATTRIBUTE/METHOD-CALL (``attribute-hidden``) one
-(``return self._always(...)`` / ``return _Helper().always(...)``), which the resolver now traces into
-the bound method. The current residual headroom is ``attr-value-hidden``: a constant returned through
-a bare attribute VALUE with no call (``return self._ALWAYS``) that the resolver only proves for a
-NAME / a top-level helper CALL / a bound-method CALL, so it still blesses. Each ratchet step is: catch
-this level, add a subtler one.
+(``return _always(...)``), the ATTRIBUTE/METHOD-CALL (``attribute-hidden``) one
+(``return self._always(...)`` / ``return _Helper().always(...)``), and — this fire — the bare
+ATTRIBUTE VALUE (``attr-value-hidden``) one (``return self._ALWAYS`` where ``_ALWAYS = True`` in the
+class body), which the resolver now traces into the class-body constant assignment. The current
+residual headroom is ``instance-attr-hidden``: a constant returned through an INSTANCE attribute bound
+in the constructor (``return self._ALWAYS`` where ``_ALWAYS`` is set in ``def __init__``, not the class
+body) that the resolver only proves for a NAME / a top-level helper CALL / a bound-method CALL / a
+class-body attribute VALUE, so it still blesses. Each ratchet step is: catch this level, add a subtler
+one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -225,6 +228,49 @@ def _attr_value_hidden(token: str) -> str:
     return f"class _Helper:\n    val = True\n{sym} = _Helper().val\n"
 
 
+def _instance_attr_hidden(token: str) -> str:
+    """A guard returning its constant through an INSTANCE attribute set in ``__init__`` (``return
+    self._ALWAYS`` where ``_ALWAYS`` is bound in ``def __init__``, not in the class body).
+
+    Once the resolver traces a bare class-body attribute VALUE (``self._ALWAYS`` with ``_ALWAYS =
+    True`` in the class body), the next honest headroom is an attribute bound to its constant in the
+    CONSTRUCTOR instead — the resolver only looks at class-body assignments, so an instance attribute
+    set at build time still reads as a real decision and blesses. Carries the pattern, valid Python —
+    the 'add a subtler mutant' ratchet once ``attr-value-hidden`` is caught.
+    """
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def __init__(self):\n"
+            "        self.val = True\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper().val\n"
+        )
+    if _callable_name(token):
+        if token.strip().startswith("class"):
+            return (
+                f"class {sym}:\n"
+                "    def __init__(self):\n"
+                "        self._ALWAYS = True\n"
+                "    def check(self, action):\n"
+                "        return self._ALWAYS\n"
+            )
+        return (
+            "class _Helper:\n"
+            "    def __init__(self):\n"
+            "        self.val = True\n"
+            f"def {sym}(*args, **kwargs):\n"
+            "    return _Helper().val\n"
+        )
+    return (
+        f"class _Helper:\n    def __init__(self):\n        self.val = True\n{sym} = _Helper().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -269,10 +315,16 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # A pass-through whose constant is returned through an ATTRIBUTE/METHOD call — subtler still
         # (now CAUGHT: the resolver traces a bound-method call to its constant).
         MutantCase("attribute-hidden", _attribute_hidden(tok), False),
-        # A pass-through whose constant is returned through a bare ATTRIBUTE VALUE (no call) — the
-        # honest residual headroom once a bound-method CALL is traced (the resolver proves a
-        # constant for a NAME / top-level helper CALL / bound-method CALL, not an Attribute value).
+        # A pass-through whose constant is returned through a bare ATTRIBUTE VALUE (no call) — now
+        # CAUGHT: the resolver traces a class-body attribute value (self._ALWAYS with _ALWAYS = True)
+        # to its constant.
         MutantCase("attr-value-hidden", _attr_value_hidden(tok), False),
+        # A pass-through whose constant is returned through an INSTANCE attribute set in __init__
+        # (return self._ALWAYS where _ALWAYS is bound in the constructor, not the class body) — the
+        # honest residual headroom once a class-body attribute VALUE is traced (the resolver proves a
+        # constant for a NAME / top-level helper CALL / bound-method CALL / class-body attribute
+        # VALUE, not an attribute bound at build time).
+        MutantCase("instance-attr-hidden", _instance_attr_hidden(tok), False),
     ]
 
 

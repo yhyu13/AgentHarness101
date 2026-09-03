@@ -184,8 +184,9 @@ def _resolve_attribute_constant(
     ``_Helper()._method(...)`` (a method on a module-level class). Only a call to a method that
     provably always returns ONE constant resolves; a method that decides on its inputs (returns a
     non-constant) stays ``_NON_CONSTANT`` so a real guard that delegates to a deciding helper is
-    never over-rejected. A bare attribute VALUE (``self._ALWAYS``, no call) is NOT resolved here —
-    that is the next ratchet headroom."""
+    never over-rejected. A bare attribute VALUE (``self._ALWAYS``, no call) is NOT resolved here — it is
+    resolved by ``_resolve_attribute_value_constant`` (a class-body constant assignment), so this path
+    only handles a method CALL."""
     attr = func.attr
     val = func.value
     if isinstance(val, ast.Name) and val.id == "self" and current_class is not None:
@@ -197,6 +198,56 @@ def _resolve_attribute_constant(
             classes[val.func.id], attr, env, helpers, sources, resolving, classes, current_class
         )
     return _NON_CONSTANT
+
+
+def _resolve_attribute_value_constant(
+    node: ast.Attribute,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> tuple[bool, object]:
+    """``(is_constant, key)`` for a bare attribute VALUE with no call (``self._ALWAYS``,
+    ``_Helper().val``, ``_Mod.val``).
+
+    The residual inert-guard evasion: a guard returns its constant through a plain attribute READ
+    rather than a literal, a NAME, a top-level helper CALL, or a bound-method CALL, so
+    ``return self._ALWAYS`` (where ``_ALWAYS = True`` in the class body) always returns the same
+    constant yet reads as state-dependent. Resolves it to the class-body constant assignment.
+
+    Anti-over-rejection: only resolves when the attribute is bound to a PROVABLE constant literal in a
+    class body we can statically see. An attribute set in ``__init__`` (an instance attribute), mutated
+    later, or carrying a real decision (a ``Compare`` like ``path in roots`` is a different node, never
+    here) is NOT resolved — so a real guard is never flagged.
+    """
+    attr = node.attr
+    val = node.value
+    target_class: ast.ClassDef | None = None
+    if isinstance(val, ast.Name) and val.id == "self" and current_class is not None:
+        target_class = current_class
+    elif isinstance(val, ast.Call) and isinstance(val.func, ast.Name) and val.func.id in classes:
+        target_class = classes[val.func.id]
+    elif isinstance(val, ast.Name) and val.id in classes:
+        target_class = classes[val.id]
+    if target_class is None:
+        return False, None
+    for stmt in target_class.body:
+        if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+            continue
+        target = stmt.targets[0]
+        if not (
+            (isinstance(target, ast.Name) and target.id == attr)
+            or (isinstance(target, ast.Attribute) and target.attr == attr)
+        ):
+            continue
+        ok, key = _resolve_literal_key(
+            stmt.value, env, helpers, sources, resolving, classes, current_class
+        )
+        if ok:
+            return True, key
+    return False, None
 
 
 def _resolve_literal_key(
@@ -224,8 +275,9 @@ def _resolve_literal_key(
     names to their def; ``helpers`` is the memoised callable→constant cache; ``resolving`` guards
     recursion cycles; ``classes`` maps module-level class names to their def; ``current_class`` is
     the class being analysed (so ``self._method`` resolves on it). Only a plain-``Name`` call to a
-    top-level helper or a bound-method/``_Helper().method`` call is traced — a bare attribute VALUE
-    (``self._ALWAYS``) and a name not in ``sources`` fall back to non-constant, so a real guard
+    top-level helper, a bound-method/``_Helper().method`` call, or a bare attribute VALUE reading a
+    class-body constant (``self._ALWAYS`` with ``_ALWAYS = True`` in the class body) is traced — a name
+    not in ``sources`` and an attribute bound in ``__init__`` fall back to non-constant, so a real guard
     that delegates to a *deciding* helper is never over-rejected."""
     if isinstance(node, ast.Constant):
         return True, node.value
@@ -272,6 +324,13 @@ def _resolve_literal_key(
                 return False, None
             pairs.append((kk, kv))
         return True, tuple(pairs)
+    if isinstance(node, ast.Attribute):
+        # A bare attribute VALUE (no call) that reads a provable constant from a class body
+        # (``self._ALWAYS``, ``_Helper().val``) — resolves to the constant, so an inert guard that
+        # always returns the same value via an attribute read is no longer read as state-dependent.
+        return _resolve_attribute_value_constant(
+            node, env, helpers, sources, resolving, classes or {}, current_class
+        )
     return False, None
 
 

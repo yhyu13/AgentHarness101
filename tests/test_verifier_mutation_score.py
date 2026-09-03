@@ -279,8 +279,18 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(attr_value.text)  # valid Python
         run_av = TraceabilityVerifier.classify(p.pattern, p.violations, attr_value.text, p.id)
-        assert run_av.did_expand is True, (
-            f"{p.id} attr-value-hidden fake is the honest residual headroom and must still bless"
+        assert run_av.did_expand is False, (
+            f"{p.id} attr-value-hidden fake (constant via a bare class-body attribute VALUE) "
+            f"must now be rejected"
+        )
+        instance = next(c for c in mutant_cases(p) if c.label == "instance-attr-hidden")
+        assert re.search(p.pattern, instance.text), (
+            f"{p.id} instance-attr-hidden fake must carry the pattern, got {instance.text!r}"
+        )
+        ast.parse(instance.text)  # valid Python
+        run_ins = TraceabilityVerifier.classify(p.pattern, p.violations, instance.text, p.id)
+        assert run_ins.did_expand is True, (
+            f"{p.id} instance-attr-hidden fake is the honest residual headroom and must still bless"
         )
 
 
@@ -353,11 +363,12 @@ def test_verifier_still_blesses_method_that_decides_on_state() -> None:
     assert run.safe is True
 
 
-def test_attribute_value_constant_remains_headroom() -> None:
-    """The new residual headroom is a constant returned through a bare ATTRIBUTE VALUE with NO call
-    (``return self._ALWAYS``, where ``_ALWAYS`` is a class attribute). The resolver proves a constant
-    for a NAME, a top-level helper CALL, and a bound-method CALL, but not a plain attribute VALUE, so
-    this guard is NOT flagged inert — the verifier still blesses it honestly."""
+def test_attribute_value_constant_is_now_rejected() -> None:
+    """A constant returned through a bare class-body ATTRIBUTE VALUE with NO call (``return
+    self._ALWAYS``, where ``_ALWAYS = True`` in the class body) is an inert pass-through: always the
+    same constant, never inspects its inputs. The resolver now traces a class-body attribute value
+    into its constant, so this guard is flagged inert and NOT blessed (the previous residual
+    headroom is closed)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -366,4 +377,42 @@ def test_attribute_value_constant_remains_headroom() -> None:
         "        return self._ALWAYS\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, "bare attribute-VALUE constant is the honest residual headroom"
+    assert run.did_expand is False, (
+        "class-body attribute-VALUE constant is inert and must be rejected"
+    )
+
+
+def test_instance_attr_constant_remains_headroom() -> None:
+    """The NEW residual headroom is a constant returned through an INSTANCE attribute VALUE bound in
+    ``__init__`` (``return self._ALWAYS`` where ``_ALWAYS`` is set in the constructor, not the class
+    body). The resolver proves a constant for a NAME, a top-level helper CALL, a bound-method CALL,
+    and a class-body attribute VALUE, but not an attribute bound at build time, so this guard is NOT
+    flagged inert — the verifier still blesses it honestly."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def __init__(self):\n"
+        "        self._ALWAYS = True\n"
+        "    def check(self, action):\n"
+        "        return self._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "instance-attribute bound in __init__ is the honest residual headroom"
+    )
+
+
+def test_module_class_attribute_value_is_rejected() -> None:
+    """A constant returned through a bare attribute VALUE referencing a MODULE-LEVEL CLASS by name
+    (``return _Mod.val`` where ``_Mod`` is a class with ``val = True`` in its body) is the same inert
+    pass-through read through the class object rather than an instance. The resolver traces a class
+    referenced by bare name too, so this guard is flagged inert and NOT blessed."""
+    p = _constitution().principles[2]  # SEC-03 'def redact_value|_redact_text|redact_secrets'
+    guard = (
+        "class _Mod:\n"
+        "    val = True\n"
+        "def redact_value(text):\n"
+        "    return _Mod.val\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, "module-class attribute VALUE constant must be rejected as inert"
