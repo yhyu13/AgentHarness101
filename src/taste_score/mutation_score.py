@@ -32,10 +32,12 @@ one (``nested-factory-hidden``, ``_make()`` returns ``_build()`` and the guard r
 which the resolver now follows to the base builder that directly constructs the class, and — this fire —
 the FACTORY-METHOD one (``static-factory-hidden``, ``_Helper.create().val`` where ``create`` is a
 ``@staticmethod``/``@classmethod``), which the resolver now follows to the method's single statically-known
-return class (and its method→method delegation chain). The current residual headroom is
-``nested-static-factory-hidden``: a constant returned through an instance reached by a factory method that
-DELEGATES to ANOTHER factory method on the same class (``_Helper.create()`` returns ``_build()``), whose
-method→method delegation chain the one-level-deep class-factory resolver does not trace. Each ratchet step
+return class (and its method→method delegation chain). This fire the resolver also follows a METHOD→METHOD
+delegation chain to the base builder (``create()`` returning ``_build()``), so ``nested-static-factory-hidden``
+is now caught. The current residual headroom moved one ratchet step deeper to
+``classmethod-cls-factory-hidden``: a constant returned through an instance reached by a CLASSMETHOD factory
+that builds via the ``cls`` receiver (``_Helper.create().val`` where ``create`` is a ``@classmethod`` doing
+``h = cls()``), whose ``cls()`` construction the static analyzer cannot tie to a class. Each ratchet step
 is: catch this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
@@ -545,6 +547,58 @@ def _nested_static_factory_hidden(token: str) -> str:
     )
 
 
+def _classmethod_cls_factory_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+    builds via the ``cls`` receiver (``_Helper.create().val`` where ``create`` is a ``@classmethod``
+    doing ``h = cls(); h._setup(); return h``): the resolver traces a class-level factory METHOD only
+    when its body DIRECTLY constructs a module-level class (``_Helper()``/``h = _Helper()``); a ``cls()``
+    construction is a runtime-parameter receiver the static analyzer cannot tie to a class, so the read
+    is not proven a constant and the guard still blesses. The 'add a subtler mutant' ratchet once
+    ``nested-static-factory-hidden`` is caught (the method→method delegation chain now traces it)."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper.create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    def check(self, action):\n"
+            f"        return {sym}.create()._ALWAYS\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _Helper.create().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -620,11 +674,16 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("static-factory-hidden", _static_factory_hidden(tok), False),
         # A pass-through whose constant is read on an instance reached through a factory method that
         # DELEGATES to ANOTHER factory method on the same class (_Helper.create() returns _build(); the
-        # guard reads _Helper.create().val) — the resolver traces a class-level factory method ONE level
-        # deep but does NOT follow a METHOD→METHOD delegation chain, so the base builder's return class is
-        # untracked and the read stays non-constant: the honest residual headroom once static-factory-hidden
-        # is caught.
+        # guard reads _Helper.create().val) — now CAUGHT: the resolver follows a method→method
+        # delegation chain to the base builder that directly constructs the class.
         MutantCase("nested-static-factory-hidden", _nested_static_factory_hidden(tok), False),
+        # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+        # builds via the `cls` receiver (_Helper.create().val where create is @classmethod, doing
+        # h = cls(); h._setup(); return h) — the resolver traces a class-level factory method only when it
+        # DIRECTLY constructs a module-level class (_Helper()/h = _Helper()); a `cls()` construction is a
+        # runtime-parameter receiver it cannot tie to a class, so the read stays non-constant: the honest
+        # residual headroom once nested-static-factory-hidden is caught.
+        MutantCase("classmethod-cls-factory-hidden", _classmethod_cls_factory_hidden(tok), False),
     ]
 
 

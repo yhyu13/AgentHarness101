@@ -362,6 +362,43 @@ def _factory_receiver(
     return None, None
 
 
+def _sibling_method_factory_receiver(
+    value: ast.AST,
+    class_def: ast.ClassDef,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    _depth: int = 0,
+) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
+    """``(class, factory_method)`` for a delegation whose return expr is a bare-Name CALL to a SIBLING
+    method of ``class_def`` (``create()`` returns ``_build()``, both ``@staticmethod`` on the same class).
+
+    ``_factory_receiver`` resolves a module-level factory FUNCTION (a bare Name in ``sources``) or an
+    attribute call (``_Helper._build()``) — but a delegation whose return expr is a bare-Name call to a
+    method of the SAME class (neither in ``sources`` nor an attribute) falls through un-resolved, so the
+    guard is blessed. This recurses into the sibling method's own factory resolution (itself following a
+    delegation chain) to reach the BASE builder that directly constructs the class — the mutator that binds
+    the constant lives in that base builder's body, not in the delegating wrapper. ``_depth`` caps mutual
+    method-factory recursion (``a()`` returning ``b()`` returning ``a()`` cannot hang the detector). Returns
+    ``(None, None)`` when the bare name is not a method of ``class_def`` or the sibling is not a resolvable
+    factory."""
+    if _depth > 8:
+        return None, None
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)):
+        return None, None
+    method = _find_method(class_def, value.func.id)
+    if method is None:
+        return None, None
+    for r in _collect_returns_of(method):
+        sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+        if sub[0] is None:
+            sub = _sibling_method_factory_receiver(r.value, class_def, sources, classes, _depth + 1)
+        if sub[0] is not None:
+            return sub
+    # Not a delegation; the sibling method directly constructs the class (or is not a resolvable factory).
+    ret_cls = _factory_return_class(method, classes, sources, _depth)
+    return (class_def, method) if ret_cls is not None else (None, None)
+
+
 def _class_factory_receiver(
     value: ast.AST,
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
@@ -392,6 +429,13 @@ def _class_factory_receiver(
     # recurse to the base builder first, so ``create()`` returning ``_build()`` resolves to ``_build``'s class.
     for r in _collect_returns_of(method):
         sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+        if sub[0] is None:
+            # A delegation whose return expr is a bare-Name call to a SIBLING method on the same class
+            # (``create()`` returns ``_build()``, both ``@staticmethod``) is neither a module-level
+            # function (the module-function branch) nor an attribute call (``_Helper._build()``) — so
+            # ``_factory_receiver`` misses it. Recurse into the sibling method's own factory resolution
+            # to reach the base builder that directly constructs the class.
+            sub = _sibling_method_factory_receiver(r.value, cls, sources, classes, _depth + 1)
         if sub[0] is not None:
             return sub
     # Not a delegation; this method directly constructs the class (or is not a resolvable factory).
@@ -815,11 +859,24 @@ def _returns_inert_instance(
     classes: dict[str, ast.ClassDef],
     _depth: int = 0,
     _visiting: frozenset[str] = frozenset(),
+    enclosing_class: ast.ClassDef | None = None,
 ) -> bool:
     """True iff ``expr`` constructs (or is a local name bound to) an instance of a FULLY-INERT class —
-    a pure factory-ship of an inert shell, which contributes no real guard logic."""
+    a pure factory-ship of an inert shell, which contributes no real guard logic.
+
+    ``enclosing_class`` is the class ``fn`` is a method of (``current_class`` from the parent), so a
+    delegation whose return expr is a bare-Name call to a SIBLING method (``create()`` returns ``_build()``)
+    is followed to the class it builds; a module-level function has ``None`` here and skips that branch."""
     locals_map = _named_local_classes(fn, classes)
     cls = _return_expr_class(expr, locals_map, classes, sources)
+    if cls is None and enclosing_class is not None:
+        # A delegation whose return expr is a bare-Name call to a SIBLING METHOD of ``enclosing_class``
+        # (``create()`` returns ``_build()``, both ``@staticmethod``) is neither a module-level function
+        # nor a direct class construction, so ``_return_expr_class`` misses it. Resolve it through the
+        # sibling method's factory chain to the built class, then check that class's inertness.
+        built, _ = _sibling_method_factory_receiver(expr, enclosing_class, sources, classes)
+        if built is not None:
+            cls = built
     if cls is None:
         return False
     return _class_is_fully_inert(
@@ -888,7 +945,15 @@ def _is_inert_function(
             # A pure factory-ship of an inert class is itself inert, so a factory that only builds an
             # inert shell does not un-poison the module's inertness.
             if _returns_inert_instance(
-                r.value, fn, env, helpers, sources, classes, _depth=_depth, _visiting=_visiting
+                r.value,
+                fn,
+                env,
+                helpers,
+                sources,
+                classes,
+                _depth=_depth,
+                _visiting=_visiting,
+                enclosing_class=current_class,
             ):
                 key.add("inert-instance")
                 continue

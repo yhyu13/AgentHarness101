@@ -247,10 +247,10 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     returns a fully-inert mutated instance (``factory-hidden``), a factory that DELEGATES to a
     base builder (``nested-factory-hidden``), AND a class-level factory METHOD (``static-factory-hidden``,
     ``_Helper.create().val``), following the factory chain to the constructor. The honest
-    residual headroom moved one ratchet step deeper to ``nested-static-factory-hidden`` (a constant reached
-    through a factory method that delegates to ANOTHER factory method on the same class,
-    ``_Helper.create()`` returns ``_build()``, whose method→method delegation chain the resolver does not
-    trace). Each caught cheat level reveals a subtler still-unsolved one, so
+    residual headroom moved one ratchet step deeper to ``classmethod-cls-factory-hidden`` (a constant
+    reached through a ``@classmethod`` factory that builds via the ``cls`` receiver, ``_Helper.create()``
+    doing ``h = cls()``, a runtime-parameter receiver the static analyzer cannot tie to a class). Each
+    caught cheat level reveals a subtler still-unsolved one, so
     verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
     for p in _constitution().principles:
         partial = next(c for c in mutant_cases(p) if c.label == "partial")
@@ -350,9 +350,22 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(nested_sf.text)  # valid Python
         run_nsf = TraceabilityVerifier.classify(p.pattern, p.violations, nested_sf.text, p.id)
-        assert run_nsf.did_expand is True, (
+        assert run_nsf.did_expand is False, (
             f"{p.id} nested-static-factory-hidden fake (constant reached through a factory method that "
-            f"delegates to another factory method) is the honest residual headroom and must still bless"
+            f"delegates to another factory method) must now be rejected — the resolver follows the "
+            f"method→method delegation chain to the base builder"
+        )
+        classmethod_sf = next(
+            c for c in mutant_cases(p) if c.label == "classmethod-cls-factory-hidden"
+        )
+        assert re.search(p.pattern, classmethod_sf.text), (
+            f"{p.id} classmethod-cls-factory-hidden fake must carry the pattern, got {classmethod_sf.text!r}"
+        )
+        ast.parse(classmethod_sf.text)  # valid Python
+        run_cm = TraceabilityVerifier.classify(p.pattern, p.violations, classmethod_sf.text, p.id)
+        assert run_cm.did_expand is True, (
+            f"{p.id} classmethod-cls-factory-hidden fake (constant reached through a @classmethod factory "
+            f"that builds via the cls receiver) is the new honest residual headroom and must still bless"
         )
 
 
@@ -567,13 +580,12 @@ def test_static_factory_indirect_attr_constant_is_now_rejected() -> None:
     assert run.safe is True
 
 
-def test_nested_static_factory_indirect_attr_constant_remains_headroom() -> None:
+def test_nested_static_factory_indirect_attr_constant_is_now_rejected() -> None:
     """A constant reached through a factory method that DELEGATES to ANOTHER factory method on the same
     class (``SafetyGuard.create()`` returns ``_build()``, and the guard reads ``SafetyGuard.create()._ALWAYS``)
-    is the NEW honest residual headroom: the resolver traces a class-level factory method one level deep
-    (a direct construction) but does NOT follow a method→method delegation chain, so the base builder's
-    return class is untracked, the read is not proven a constant, and the guard still blesses. It carries
-    the pattern, valid Python."""
+    is now REJECTED: the resolver follows a method→method delegation chain to the base builder that directly
+    constructs the class, then resolves the attribute constant through the mutator the base builder CALLS, so
+    the guard is flagged inert and NOT blessed. It carries the pattern, valid Python."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -591,9 +603,38 @@ def test_nested_static_factory_indirect_attr_constant_remains_headroom() -> None
         "        return SafetyGuard.create()._ALWAYS\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "a constant reached through a factory method that delegates to another factory method must now be "
+        "rejected (the resolver traces the method→method factory delegation chain to the base builder)"
+    )
+    assert run.safe is True
+
+
+def test_classmethod_cls_factory_indirect_attr_constant_remains_headroom() -> None:
+    """A constant reached through a CLASSMETHOD factory that builds via the ``cls`` receiver
+    (``SafetyGuard.create()`` does ``h = cls(); h._setup(); return h``, the guard reads
+    ``SafetyGuard.create()._ALWAYS``) is the NEW honest residual headroom: the resolver traces a class-level
+    factory method only when its body DIRECTLY constructs a module-level class (``SafetyGuard()``/``h =
+    SafetyGuard()``); a ``cls()`` construction is a runtime-parameter receiver it cannot tie to a class, so
+    the read is not proven a constant and the guard still blesses. It carries the pattern, valid Python."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    def check(self, action):\n"
+        "        return SafetyGuard.create()._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
     assert run.did_expand is True, (
-        "a constant reached through a factory method that delegates to another factory method is the "
-        "honest residual headroom (the resolver does not trace a method→method factory delegation chain)"
+        "a constant reached through a @classmethod factory that builds via the cls receiver is the honest "
+        "residual headroom (a cls() construction is a runtime-parameter receiver the analyzer cannot tie "
+        "to a class)"
     )
     assert run.safe is True
 
