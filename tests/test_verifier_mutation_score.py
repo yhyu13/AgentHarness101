@@ -236,9 +236,11 @@ def test_verifier_still_blesses_a_real_branching_guard() -> None:
 
 def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> None:
     """After the helper-hidden hardening, the ``helper-hidden`` fake (a constant returned through a
-    top-level HELPER CALL, ``return _always()``) is now REJECTED; the honest residual headroom moved
-    one ratchet step deeper to ``attribute-hidden`` (a constant returned through an ATTRIBUTE/METHOD
-    call the detector cannot trace, ``return self._always()``). Each caught cheat level reveals a
+    top-level HELPER CALL, ``return _always()``) is now REJECTED, and so — this fire — is
+    ``attribute-hidden`` (a constant delegated through an ATTRIBUTE/METHOD call, ``return
+    self._always()``) which the resolver now traces into the bound method. The honest residual
+    headroom moved one ratchet step deeper to ``attr-value-hidden`` (a constant returned through a
+    bare attribute VALUE, ``return self._ALWAYS``, not a call). Each caught cheat level reveals a
     subtler still-unsolved one, so verifier_strength stays honestly < 1.0 — the non-saturation
     ratchet keeps firing."""
     for p in _constitution().principles:
@@ -268,8 +270,17 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(attribute.text)  # valid Python
         run_a = TraceabilityVerifier.classify(p.pattern, p.violations, attribute.text, p.id)
-        assert run_a.did_expand is True, (
-            f"{p.id} attribute-hidden fake is the honest residual headroom and must still bless"
+        assert run_a.did_expand is False, (
+            f"{p.id} attribute-hidden fake (constant via an ATTRIBUTE/METHOD call) must be rejected"
+        )
+        attr_value = next(c for c in mutant_cases(p) if c.label == "attr-value-hidden")
+        assert re.search(p.pattern, attr_value.text), (
+            f"{p.id} attr-value-hidden fake must carry the pattern, got {attr_value.text!r}"
+        )
+        ast.parse(attr_value.text)  # valid Python
+        run_av = TraceabilityVerifier.classify(p.pattern, p.violations, attr_value.text, p.id)
+        assert run_av.did_expand is True, (
+            f"{p.id} attr-value-hidden fake is the honest residual headroom and must still bless"
         )
 
 
@@ -307,10 +318,11 @@ def test_verifier_still_blesses_helper_that_decides() -> None:
     assert run.safe is True
 
 
-def test_attribute_call_constant_remains_headroom() -> None:
-    """The new residual headroom is an ATTRIBUTE/method call (``self._always()``). The helper is
-    not a top-level bare-name function, so the trace resolver cannot prove it always returns a
-    constant and the guard is NOT flagged inert — i.e. the verifier still blesses it honestly."""
+def test_verifier_rejects_attribute_call_passthrough() -> None:
+    """A cheater ships an inert guard that delegates its constant through a METHOD call on the
+    guard's own class (``self._always()``) — the symbol AND real code are present but the guard
+    always returns the same constant without inspecting its inputs. The resolver now traces a bound
+    method call into the method's constant, so the pass-through is flagged inert and NOT blessed."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -320,4 +332,38 @@ def test_attribute_call_constant_remains_headroom() -> None:
         "        return self._always(action)\n"
     )
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, "attribute/method-call constant is the honest residual headroom"
+    assert run.did_expand is False, "attribute/method-call constant must now be rejected as inert"
+
+
+def test_verifier_still_blesses_method_that_decides_on_state() -> None:
+    """Hardening must NOT over-reject: a method that delegates to ANOTHER method on ``self`` which
+    DECIDES on its inputs (returns a non-constant like ``path in roots``) is a real guard, not a
+    pass-through. Only a called method that provably always returns ONE constant is treated as inert."""
+    p = _constitution().principles[0]  # SEC-01 'allows_write|_is_within|allow_roots'
+    real = (
+        "class Guard:\n"
+        "    _allowed_roots = ('/a', '/b')\n"
+        "    def _decide(self, path):\n"
+        "        return path in self._allowed_roots\n"
+        "    def allows_write(self, path):\n"
+        "        return self._decide(path)\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, real, p.id)
+    assert run.did_expand is True, "verifier must bless a guard that delegates to a deciding method"
+    assert run.safe is True
+
+
+def test_attribute_value_constant_remains_headroom() -> None:
+    """The new residual headroom is a constant returned through a bare ATTRIBUTE VALUE with NO call
+    (``return self._ALWAYS``, where ``_ALWAYS`` is a class attribute). The resolver proves a constant
+    for a NAME, a top-level helper CALL, and a bound-method CALL, but not a plain attribute VALUE, so
+    this guard is NOT flagged inert — the verifier still blesses it honestly."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    _ALWAYS = True\n"
+        "    def check(self, action):\n"
+        "        return self._ALWAYS\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, "bare attribute-VALUE constant is the honest residual headroom"

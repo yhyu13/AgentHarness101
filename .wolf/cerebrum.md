@@ -1,7 +1,7 @@
 # Cerebrum
 
 > OpenWolf's learning memory. Updated automatically as the AI learns from interactions.
-> Last updated: 2026-09-02
+> Last updated: 2026-09-04
 
 ## User Preferences
 
@@ -35,6 +35,7 @@
 - [2026-09-03] 给 `constitution.toml` 追加 `[[principles]]` 块时，若 patch 的 old_string 只锚一个完整 block，会把它**整体替换**成新块（我拿 id=SEC-08 那块当锚，结果 SEC-08 被覆盖成 SEC-09，险丢一条已提交原则）。教训：追加必须 old_string 锚「待插入的前一个 block 的结尾 + 下一段的开头」，命中后立即 `grep -c 'id = "SEC-'` 校验全部 id 齐全再跑测试。
 - [2026-09-04] 给 mutation-score 加「更细假守卫」时，STATEMENT-FRAGMENT token（如 SEC-10 的 `permission not in self._enabled`）的假守卫**必须把字面量嵌进真守卫代码**，且 `_guard_symbol` 对这类 token 返回 `None`——初版 `_constant_hidden` 对 fragment 只吐 `true = True` + 一个空守卫，字面量没出现 → `re.search(pattern,text)` 为 None → 被「拒」但**拒错理由**（pattern 不存在，不是惰性被判），把测量带偏。改法：fragment 分支先把 token 里的正则转义剥掉，再把真句子嵌进 `if ...:` 守卫体。
 - [2026-09-04] 测试 fixture 里拿 `def allow(path): return True` 当「合规守卫」范例已失效——那正是 verifier 判定的惰性「永远放行」作弊（恒返回常量、不看输入）。凡作「已实现守卫」范例的 fixture 用真决策守卫 `return path in _allowed_roots`（非常量返回），否则 compliance 从 1.0 掉到 0.0（`test_taste_score.*`/`test_taste_score_constitution.*` 三个 fixture 已改）。
+- [2026-09-04] 给 verifier 加「method-call 隐藏常量」检测（`return self._always()` / `_Helper().always()`），必须把**类上下文穿到底**：`_resolve_literal_key`/`_is_inert_function`/`_is_inert_statement`/`_is_inert_module` 都要多带 `classes`(模块类名→ClassDef) 与 `current_class`(当前类)，否则 `self._m()` 无从解析。写完必跑 `test_hardened_verifier_still_sees_every_constitution_anchor_as_compliant`：它是**防过收紧**的哨兵——真实 11 个锚文件若被误判 inert，csdd 会从 1.0 掉下来，即过收紧。每抓一级必加「更细假守卫」并把 `test_inert_vs_constant_hidden_*_split_the_cheat_space` 的对应断言改成「拒」，旧「仍 bless」的断言留一条新 headroom 钉住——否则 verifier_strength 会饱和到 1.0 触发 `test_verifier_strength_is_bounded_and_honestly_unsaturated` 红。
 
 ## Decision Log
 

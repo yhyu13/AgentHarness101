@@ -68,12 +68,145 @@ def _is_dead_stub(text: str) -> bool:
     return all(_stmt_is_placeholder(s) for s in tree.body)
 
 
+def _find_method(
+    class_def: ast.ClassDef, name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """The method ``name`` defined directly on ``class_def``, or ``None``."""
+    for stmt in class_def.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name == name:
+            return stmt
+    return None
+
+
+def _resolve_callable_constant(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    env: dict[str, object],
+    helpers: dict[str, object],
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+    key: str,
+) -> object:
+    """The single constant value a function/method always-returns, or ``_NON_CONSTANT``.
+
+    A callable is pure-constant iff it has at least one ``return`` and EVERY return resolves to the
+    same constant (which may itself flow through another pure-constant callable or a constant NAME).
+    A callable that returns a non-constant (a decision on state) or is in a recursion cycle is
+    ``_NON_CONSTANT``. ``key`` is the identity used for cycle-detection; ``current_class`` is the
+    class a method is defined on (so a ``self._helper()`` call inside it can be traced)."""
+    if fn is None:
+        return _NON_CONSTANT
+    if key in resolving:
+        return _NON_CONSTANT  # recursion cycle -> cannot prove a constant
+    resolving = resolving | {key}
+    returns = _collect_returns_of(fn)
+    if not returns:
+        return _NON_CONSTANT
+    seen = []
+    for r in returns:
+        ok, k = _resolve_literal_key(
+            r.value, env, helpers, sources, resolving, classes, current_class
+        )
+        if not ok:
+            return _NON_CONSTANT
+        seen.append(repr(k))
+    if len(set(seen)) != 1:
+        return _NON_CONSTANT
+    ok, val = _resolve_literal_key(
+        returns[0].value, env, helpers, sources, resolving, classes, current_class
+    )
+    return val if ok else _NON_CONSTANT
+
+
+def _resolve_module_function_value(
+    name: str,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> object:
+    """The single constant a module-level helper always-returns, memoised in ``helpers``, or
+    ``_NON_CONSTANT`` if the name is not a top-level function or its value is not a constant."""
+    if helpers is not None and name in helpers:
+        return helpers[name]
+    fn = sources.get(name)
+    if fn is None:
+        return _NON_CONSTANT
+    val = _resolve_callable_constant(
+        fn, env, helpers, sources, resolving, classes, current_class, name
+    )
+    if helpers is not None:
+        helpers[name] = val
+    return val
+
+
+def _resolve_method_constant(
+    class_def: ast.ClassDef,
+    method_name: str,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> object:
+    """The single constant a bound method always-returns, or ``_NON_CONSTANT``.
+
+    ``class_def`` is the class the method is looked up on; ``current_class`` is the class we are
+    currently resolving *inside* (so a ``self._helper()`` call in the method's body resolves too)."""
+    method = _find_method(class_def, method_name)
+    if method is None:
+        return _NON_CONSTANT
+    key = f"method:{class_def.name}:{method_name}"
+    val = _resolve_callable_constant(
+        method, env, helpers, sources, resolving, classes, class_def, key
+    )
+    if helpers is not None:
+        helpers[key] = val
+    return val
+
+
+def _resolve_attribute_constant(
+    func: ast.Attribute,
+    env: dict[str, object],
+    helpers: dict[str, object] | None,
+    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    resolving: frozenset[str],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
+) -> object:
+    """The single constant a bound-method CALL returns, or ``_NON_CONSTANT``.
+
+    Traces ``self._method(...)`` (a method on the enclosing class being analysed) and
+    ``_Helper()._method(...)`` (a method on a module-level class). Only a call to a method that
+    provably always returns ONE constant resolves; a method that decides on its inputs (returns a
+    non-constant) stays ``_NON_CONSTANT`` so a real guard that delegates to a deciding helper is
+    never over-rejected. A bare attribute VALUE (``self._ALWAYS``, no call) is NOT resolved here —
+    that is the next ratchet headroom."""
+    attr = func.attr
+    val = func.value
+    if isinstance(val, ast.Name) and val.id == "self" and current_class is not None:
+        return _resolve_method_constant(
+            current_class, attr, env, helpers, sources, resolving, classes, current_class
+        )
+    if isinstance(val, ast.Call) and isinstance(val.func, ast.Name) and val.func.id in classes:
+        return _resolve_method_constant(
+            classes[val.func.id], attr, env, helpers, sources, resolving, classes, current_class
+        )
+    return _NON_CONSTANT
+
+
 def _resolve_literal_key(
     node: ast.AST,
     env: dict[str, object],
     helpers: dict[str, object] | None = None,
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
     resolving: frozenset[str] = frozenset(),
+    classes: dict[str, ast.ClassDef] | None = None,
+    current_class: ast.ClassDef | None = None,
 ) -> tuple[bool, object]:
     """``(is_constant, key)`` for ``node`` — a hashable identity so two constant literals compare
     equal iff structurally identical.
@@ -83,14 +216,17 @@ def _resolve_literal_key(
     the module-constant ``env`` (``return ALWAYS`` where ``ALWAYS = True``) so a constant decision
     hidden behind a name is no longer read as state-dependent. Hardened further: resolves a
     TOP-LEVEL HELPER CALL (``return _always(...)``) when the helper provably always returns one
-    constant, so a constant hidden behind a helper call is likewise caught. ``(False, None)``
-    means non-constant (a real decision on state), which the inert detector treats as a genuine
-    guard. ``sources`` maps top-level function names to their def; ``helpers`` is the memoised
-    helper→constant cache; ``resolving`` guards recursion cycles. Only a plain-``Name`` call to a
-    top-level helper is traced — an attribute/method call (``self._always()``) or a bare name not
-    in ``sources`` falls back to non-constant, so a real guard that delegates to a *deciding*
-    helper is never over-rejected.
-    """
+    constant, so a constant hidden behind a helper call is likewise caught. Hardened further still:
+    resolves a BOUND-METHOD CALL (``return self._always(...)`` / ``return _Helper().always(...)``)
+    when the called method always returns one constant, so a constant hidden behind an
+    attribute/method call is caught too. ``(False, None)`` means non-constant (a real decision on
+    state), which the inert detector treats as a genuine guard. ``sources`` maps top-level function
+    names to their def; ``helpers`` is the memoised callable→constant cache; ``resolving`` guards
+    recursion cycles; ``classes`` maps module-level class names to their def; ``current_class`` is
+    the class being analysed (so ``self._method`` resolves on it). Only a plain-``Name`` call to a
+    top-level helper or a bound-method/``_Helper().method`` call is traced — a bare attribute VALUE
+    (``self._ALWAYS``) and a name not in ``sources`` fall back to non-constant, so a real guard
+    that delegates to a *deciding* helper is never over-rejected."""
     if isinstance(node, ast.Constant):
         return True, node.value
     if isinstance(node, ast.Name):
@@ -99,14 +235,24 @@ def _resolve_literal_key(
         return False, None
     if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Name) and sources and node.func.id in sources:
-            val = _resolve_function_value(node.func.id, env, helpers, sources, resolving)
+            val = _resolve_module_function_value(
+                node.func.id, env, helpers, sources, resolving, classes or {}, current_class
+            )
+            if val is not _NON_CONSTANT:
+                return True, val
+        if isinstance(node.func, ast.Attribute) and classes:
+            val = _resolve_attribute_constant(
+                node.func, env, helpers, sources, resolving, classes, current_class
+            )
             if val is not _NON_CONSTANT:
                 return True, val
         return False, None
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         keys = []
         for e in node.elts:
-            ok, k = _resolve_literal_key(e, env, helpers, sources, resolving)
+            ok, k = _resolve_literal_key(
+                e, env, helpers, sources, resolving, classes, current_class
+            )
             if not ok:
                 return False, None
             keys.append(k)
@@ -116,8 +262,12 @@ def _resolve_literal_key(
         for k, v in zip(node.keys, node.values):
             if k is None:
                 return False, None
-            ok_k, kk = _resolve_literal_key(k, env, helpers, sources, resolving)
-            ok_v, kv = _resolve_literal_key(v, env, helpers, sources, resolving)
+            ok_k, kk = _resolve_literal_key(
+                k, env, helpers, sources, resolving, classes, current_class
+            )
+            ok_v, kv = _resolve_literal_key(
+                v, env, helpers, sources, resolving, classes, current_class
+            )
             if not ok_k or not ok_v:
                 return False, None
             pairs.append((kk, kv))
@@ -134,50 +284,6 @@ def _module_callable_sources(tree: ast.Module) -> dict[str, ast.FunctionDef | as
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             out[stmt.name] = stmt
     return out
-
-
-def _resolve_function_value(
-    name: str,
-    env: dict[str, object],
-    helpers: dict[str, object] | None,
-    sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
-    resolving: frozenset[str],
-) -> object:
-    """The single constant value a top-level helper always-returns, or ``_NON_CONSTANT``.
-
-    A helper is pure-constant iff it has at least one ``return`` and EVERY return resolves to the
-    same constant (which may itself flow through another pure-constant helper call). A helper that
-    returns a non-constant (a decision on state) or is in a recursion cycle is ``_NON_CONSTANT``.
-    Results are memoised in ``helpers`` so a shared helper is traced once."""
-
-    if helpers is not None and name in helpers:
-        return helpers[name]
-    fn = sources.get(name)
-    if fn is None:
-        return _NON_CONSTANT
-    if name in resolving:
-        return _NON_CONSTANT  # recursion cycle -> cannot prove a constant
-    resolving = resolving | {name}
-    returns = _collect_returns_of(fn)
-    if not returns:
-        return _NON_CONSTANT
-    seen = []
-    for r in returns:
-        ok, k = _resolve_literal_key(r.value, env, helpers, sources, resolving)
-        if not ok:
-            if helpers is not None:
-                helpers[name] = _NON_CONSTANT
-            return _NON_CONSTANT
-        seen.append(repr(k))
-    if len(set(seen)) != 1:
-        if helpers is not None:
-            helpers[name] = _NON_CONSTANT
-        return _NON_CONSTANT
-    ok, val = _resolve_literal_key(returns[0].value, env, helpers, sources, resolving)
-    result = val if ok else _NON_CONSTANT
-    if helpers is not None:
-        helpers[name] = result
-    return result
 
 
 def _module_constants(tree: ast.Module) -> dict[str, object]:
@@ -232,6 +338,8 @@ def _is_inert_function(
     env: dict[str, object],
     helpers: dict[str, object],
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
 ) -> bool:
     """True iff a guard function is an inert pass-through: every ``return`` yields the SAME
     constant literal and never depends on its inputs.
@@ -244,14 +352,17 @@ def _is_inert_function(
     is also never flagged. ``env`` carries the module-constant names so a constant returned
     through a NAME (``return ALWAYS``) resolves to its value and is caught. ``helpers``/
     ``sources`` let a constant returned through a top-level HELPER CALL (``return _always()``)
-    be traced to its constant too — so that cheat is caught as well.
+    be traced, and now a constant returned through a BOUND-METHOD CALL on the enclosing class
+    (``return self._always()``) is traced too, via ``current_class``/``classes``.
     """
     returns = _collect_returns_of(fn)
     if not returns:
         return False  # no explicit return -> dead-stub territory, handled by _is_dead_stub
     key: set[object] = set()
     for r in returns:
-        ok, k = _resolve_literal_key(r.value, env, helpers, sources, frozenset())
+        ok, k = _resolve_literal_key(
+            r.value, env, helpers, sources, frozenset(), classes, current_class
+        )
         if not ok:
             return False  # a decision on state -> real guard
         key.add(repr(k))
@@ -270,12 +381,15 @@ def _is_inert_statement(
     env: dict[str, object],
     helpers: dict[str, object],
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    classes: dict[str, ast.ClassDef],
+    current_class: ast.ClassDef | None,
 ) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
     module docstring, a constant-only assignment, an inert function, or a class composed only
     of inert statements. A frame of real logic anywhere makes the module non-inert.
     ``env`` carries the module-constant names so a constant hidden behind a NAME is traced;
-    ``helpers``/``sources`` extend that to a constant hidden behind a HELPER CALL."""
+    ``helpers``/``sources`` extend that to a constant hidden behind a HELPER CALL, and
+    ``classes``/``current_class`` extend it to a constant hidden behind a BOUND-METHOD CALL."""
     if isinstance(stmt, ast.Pass):
         return True
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
@@ -283,12 +397,14 @@ def _is_inert_statement(
     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
         return True  # module docstring / ellipsis
     if isinstance(stmt, ast.Assign):
-        ok, _ = _resolve_literal_key(stmt.value, env, helpers, sources, frozenset())
+        ok, _ = _resolve_literal_key(
+            stmt.value, env, helpers, sources, frozenset(), classes, current_class
+        )
         return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _is_inert_function(stmt, env, helpers, sources)
+        return _is_inert_function(stmt, env, helpers, sources, classes, current_class)
     if isinstance(stmt, ast.ClassDef):
-        return all(_is_inert_statement(s, env, helpers, sources) for s in stmt.body)
+        return all(_is_inert_statement(s, env, helpers, sources, classes, stmt) for s in stmt.body)
     return False
 
 
@@ -305,8 +421,12 @@ def _is_inert_module(text: str) -> bool:
         return True  # empty/comment-only module
     env = _module_constants(tree)
     sources = _module_callable_sources(tree)
+    classes: dict[str, ast.ClassDef] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.ClassDef):
+            classes[stmt.name] = stmt
     helpers: dict[str, object] = {}
-    return all(_is_inert_statement(s, env, helpers, sources) for s in tree.body)
+    return all(_is_inert_statement(s, env, helpers, sources, classes, None) for s in tree.body)
 
 
 class TraceabilityVerifier:

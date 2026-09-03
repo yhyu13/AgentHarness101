@@ -20,11 +20,12 @@ Each missed fake is honest headroom; hardening the verifier raises the score, an
 always add a subtler mutant, so it never truly saturates.
 
 The inert-guard hardening has already caught the literal-return (``partial``) pass-through, the
-Name-returned (``constant-hidden``) one, and — most recently — the top-level HELPER-CALL
-(``helper-hidden``) one (``return _always(...)``), which the constant-return detector now traces.
-The current residual headroom is ``attribute-hidden``: a constant delegated through an
-attribute/method call (``return self._always()`` / ``_Helper().always()``) that the resolver only
-proves for a plain-``Name`` module-level call, so it still blesses. Each ratchet step is: catch
+Name-returned (``constant-hidden``) one, the top-level HELPER-CALL (``helper-hidden``) one
+(``return _always(...)``), and — this fire — the ATTRIBUTE/METHOD-CALL (``attribute-hidden``) one
+(``return self._always(...)`` / ``return _Helper().always(...)``), which the resolver now traces into
+the bound method. The current residual headroom is ``attr-value-hidden``: a constant returned through
+a bare attribute VALUE with no call (``return self._ALWAYS``) that the resolver only proves for a
+NAME / a top-level helper CALL / a bound-method CALL, so it still blesses. Each ratchet step is: catch
 this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
@@ -186,6 +187,44 @@ def _attribute_hidden(token: str) -> str:
     )
 
 
+def _attr_value_hidden(token: str) -> str:
+    """A guard returning its constant through a bare ATTRIBUTE VALUE with NO call (``return
+    self._ALWAYS``, where ``_ALWAYS`` is a class attribute).
+
+    Once the resolver traces a BOUND-METHOD CALL (``self._always()``), the next honest headroom is a
+    constant returned through a plain attribute VALUE rather than a call — the resolver proves a
+    constant for a NAME, a top-level helper CALL, and a bound-method CALL, but an ``ast.Attribute``
+    VALUE falls through to non-constant, so this guard STILL blesses. Carries the pattern, valid
+    Python — the 'add a subtler mutant' ratchet once ``attribute-hidden`` is caught.
+    """
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    val = True\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper().val\n"
+        )
+    if _callable_name(token):
+        if token.strip().startswith("class"):
+            return (
+                f"class {sym}:\n"
+                "    _ALWAYS = True\n"
+                "    def check(self, action):\n"
+                "        return self._ALWAYS\n"
+            )
+        return (
+            "class _Helper:\n"
+            "    val = True\n"
+            f"def {sym}(*args, **kwargs):\n"
+            "    return _Helper().val\n"
+        )
+    return f"class _Helper:\n    val = True\n{sym} = _Helper().val\n"
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -228,8 +267,12 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # A pass-through whose constant is returned through a HELPER CALL — subtler than both.
         MutantCase("helper-hidden", _call_constant_hidden(tok), False),
         # A pass-through whose constant is returned through an ATTRIBUTE/METHOD call — subtler still
-        # (the honest residual headroom once a top-level helper CALL is traced).
+        # (now CAUGHT: the resolver traces a bound-method call to its constant).
         MutantCase("attribute-hidden", _attribute_hidden(tok), False),
+        # A pass-through whose constant is returned through a bare ATTRIBUTE VALUE (no call) — the
+        # honest residual headroom once a bound-method CALL is traced (the resolver proves a
+        # constant for a NAME / top-level helper CALL / bound-method CALL, not an Attribute value).
+        MutantCase("attr-value-hidden", _attr_value_hidden(tok), False),
     ]
 
 
