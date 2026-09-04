@@ -391,10 +391,25 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(instance_cm.text)  # valid Python
         run_icm = TraceabilityVerifier.classify(p.pattern, p.violations, instance_cm.text, p.id)
-        assert run_icm.did_expand is True, (
+        assert run_icm.did_expand is False, (
             f"{p.id} classmethod-instance-receiver-hidden fake (constant reached through a classmethod "
-            f"factory called on an INSTANCE receiver, ``_Helper().create()``) is the new honest residual "
-            f"headroom and must still bless"
+            f"factory called on an INSTANCE receiver, ``_Helper().create()``) must now be rejected — the "
+            f"resolver ties a classmethod factory reached through a ``_Helper()`` construction back to its "
+            f"class"
+        )
+        factory_icm = next(
+            c for c in mutant_cases(p) if c.label == "factory-instance-receiver-hidden"
+        )
+        assert re.search(p.pattern, factory_icm.text), (
+            f"{p.id} factory-instance-receiver-hidden fake must carry the pattern, "
+            f"got {factory_icm.text!r}"
+        )
+        ast.parse(factory_icm.text)  # valid Python
+        run_ficm = TraceabilityVerifier.classify(p.pattern, p.violations, factory_icm.text, p.id)
+        assert run_ficm.did_expand is True, (
+            f"{p.id} factory-instance-receiver-hidden fake (constant reached through a classmethod "
+            f"factory called on an instance returned by a FACTORY FUNCTION, ``_make().create()``) is the new "
+            f"honest residual headroom and must still bless"
         )
 
 
@@ -705,10 +720,10 @@ def test_classmethod_cls_factory_is_now_rejected_and_nested_is_headroom() -> Non
         "        return _Helper().create()._ALWAYS\n"
     )
     run_instance = TraceabilityVerifier.classify(p.pattern, p.violations, instance, p.id)
-    assert run_instance.did_expand is True, (
-        "a constant reached through a classmethod factory called on an INSTANCE receiver (_Helper().create()) "
-        "is the new honest residual headroom (the receiver is a _Cls(...) construction the resolver cannot "
-        "tie to a class) and must still bless"
+    assert run_instance.did_expand is False, (
+        "a constant reached through a classmethod factory called on an INSTANCE receiver "
+        "(_Helper().create()) must now be rejected (the resolver ties the _Helper() construction "
+        "back to its class)"
     )
     assert run_instance.safe is True
 

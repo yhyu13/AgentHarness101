@@ -446,9 +446,18 @@ def _class_factory_receiver(
     if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)):
         return None, None
     recv = value.func.value
-    if not (isinstance(recv, ast.Name) and recv.id in classes):
+    # A class-level factory method reached through a bare class name (``_Helper.create()``) OR an
+    # instance construction (``_Helper().create()`` — calling a @classmethod ON an instance still passes
+    # the CLASS as ``cls``, so it builds the same receiver class). Both tie the factory method back to the
+    # class it is defined on so the ``cls()`` construction can be resolved to a constant.
+    if isinstance(recv, ast.Name):
+        if recv.id not in classes:
+            return None, None
+        cls = classes[recv.id]
+    elif isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) and recv.func.id in classes:
+        cls = classes[recv.func.id]
+    else:
         return None, None
-    cls = classes[recv.id]
     method = _find_method(cls, value.func.attr)
     if method is None:
         return None, None
