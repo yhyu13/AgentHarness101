@@ -377,10 +377,24 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(nested_cm.text)  # valid Python
         run_ncm = TraceabilityVerifier.classify(p.pattern, p.violations, nested_cm.text, p.id)
-        assert run_ncm.did_expand is True, (
+        assert run_ncm.did_expand is False, (
             f"{p.id} nested-classmethod-cls-factory-hidden fake (constant reached through a classmethod "
-            f"factory that DELEGATES to a sibling classmethod) is the new honest residual headroom and "
-            f"must still bless"
+            f"factory that DELEGATES to a sibling classmethod) must now be rejected — the resolver threads "
+            f"the ``cls`` receiver through a classmethod→classmethod delegation chain to the base builder"
+        )
+        instance_cm = next(
+            c for c in mutant_cases(p) if c.label == "classmethod-instance-receiver-hidden"
+        )
+        assert re.search(p.pattern, instance_cm.text), (
+            f"{p.id} classmethod-instance-receiver-hidden fake must carry the pattern, "
+            f"got {instance_cm.text!r}"
+        )
+        ast.parse(instance_cm.text)  # valid Python
+        run_icm = TraceabilityVerifier.classify(p.pattern, p.violations, instance_cm.text, p.id)
+        assert run_icm.did_expand is True, (
+            f"{p.id} classmethod-instance-receiver-hidden fake (constant reached through a classmethod "
+            f"factory called on an INSTANCE receiver, ``_Helper().create()``) is the new honest residual "
+            f"headroom and must still bless"
         )
 
 
@@ -630,10 +644,13 @@ def test_classmethod_cls_factory_is_now_rejected_and_nested_is_headroom() -> Non
     (``SafetyGuard.create()`` does ``h = cls(); h._setup(); return h``, the guard reads
     ``SafetyGuard.create()._ALWAYS``) is NOW CAUGHT: the resolver traces a classmethod factory's ``cls()``
     construction back to the receiver class (the ``cls`` first-arg of a ``@classmethod`` IS the class it is
-    called on), so the inert pass-through no longer blesses. The honest residual headroom moved one ratchet
-    step deeper to a classmethod factory that DELEGATES to a SIBLING classmethod (``create()`` returns
-    ``_build()``, both ``@classmethod``) — that delegation is not followed, so ``create``'s return class is
-    untracked and the read stays non-constant: the guard still blesses. Carries the pattern, valid Python."""
+    called on), so the inert pass-through no longer blesses. This fire the resolver also threads the ``cls``
+    receiver through a classmethod→classmethod DELEGATION chain to the base builder, so a classmethod factory
+    that DELEGATES to a SIBLING classmethod (``create()`` returns ``_build()``, both ``@classmethod``) is now
+    caught too. The honest residual headroom moved one ratchet step deeper to a classmethod factory CALLED ON
+    AN INSTANCE RECEIVER (``SafetyGuard().create()``) — a ``_Cls(...)`` construction, not a bare class name,
+    which the receiver-class resolver cannot tie to a class, so the read stays non-constant and the guard still
+    blesses. Carries the pattern, valid Python."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     direct = (
         "class SafetyGuard:\n"
@@ -669,11 +686,31 @@ def test_classmethod_cls_factory_is_now_rejected_and_nested_is_headroom() -> Non
         "        return SafetyGuard.create()._ALWAYS\n"
     )
     run_nested = TraceabilityVerifier.classify(p.pattern, p.violations, nested, p.id)
-    assert run_nested.did_expand is True, (
-        "a constant reached through a classmethod factory that delegates to a sibling classmethod is the new "
-        "honest residual headroom (the cls() receiver is not threaded through the classmethod delegation chain)"
+    assert run_nested.did_expand is False, (
+        "a constant reached through a classmethod factory that delegates to a sibling classmethod must now "
+        "be rejected (the resolver threads the cls() receiver through the classmethod delegation chain)"
     )
     assert run_nested.safe is True
+    instance = (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "class SafetyGuard:\n"
+        "    def check(self, action):\n"
+        "        return _Helper().create()._ALWAYS\n"
+    )
+    run_instance = TraceabilityVerifier.classify(p.pattern, p.violations, instance, p.id)
+    assert run_instance.did_expand is True, (
+        "a constant reached through a classmethod factory called on an INSTANCE receiver (_Helper().create()) "
+        "is the new honest residual headroom (the receiver is a _Cls(...) construction the resolver cannot "
+        "tie to a class) and must still bless"
+    )
+    assert run_instance.safe is True
 
 
 def test_classmethod_factory_returning_cls_directly_is_rejected() -> None:

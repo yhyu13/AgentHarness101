@@ -32,13 +32,15 @@ one (``nested-factory-hidden``, ``_make()`` returns ``_build()`` and the guard r
 which the resolver now follows to the base builder that directly constructs the class, and — this fire —
 the FACTORY-METHOD one (``static-factory-hidden``, ``_Helper.create().val`` where ``create`` is a
 ``@staticmethod``/``@classmethod``), which the resolver now follows to the method's single statically-known
-return class (and its method→method delegation chain). This fire the resolver also follows a METHOD→METHOD
-delegation chain to the base builder (``create()`` returning ``_build()``), so ``nested-static-factory-hidden``
-is now caught. The current residual headroom moved one ratchet step deeper to
-``classmethod-cls-factory-hidden``: a constant returned through an instance reached by a CLASSMETHOD factory
-that builds via the ``cls`` receiver (``_Helper.create().val`` where ``create`` is a ``@classmethod`` doing
-``h = cls()``), whose ``cls()`` construction the static analyzer cannot tie to a class. Each ratchet step
-is: catch this level, add a subtler one.
+return class (and its method→method delegation chain), and the CLASSMETHOD-CLS one (``classmethod-cls-factory-hidden``,
+``_Helper.create().val`` where ``create`` is a ``@classmethod`` building via ``h = cls()``), which the resolver
+now ties back to the receiver class. This fire the resolver also threads the ``cls`` receiver through a
+classmethod→classmethod DELEGATION chain to the base builder, so ``nested-classmethod-cls-factory-hidden``
+(``create()`` returning ``_build()``, both ``@classmethod``) is now caught. The current residual headroom moved
+one ratchet step deeper to ``classmethod-instance-receiver-hidden``: a constant returned through an instance
+reached by a CLASSMETHOD factory CALLED ON AN INSTANCE (``_Helper().create().val`` — ``_Helper()`` is a
+``_Cls(...)`` construction, not a bare class name, which the receiver-class resolver cannot tie to a class). Each
+ratchet step is: catch this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -660,6 +662,60 @@ def _nested_classmethod_cls_factory_hidden(token: str) -> str:
     )
 
 
+def _classmethod_instance_receiver_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+    itself is called on an INSTANCE (``_Helper().create().val`` — ``create`` is a ``@classmethod`` doing
+    ``h = cls()``). Once the resolver traces a classmethod factory reached through a bare CLASS NAME
+    (``_Helper.create()``) AND through a sibling-classmethod delegation chain, the next honest headroom is a
+    classmethod reached through an INSTANCE RECEIVER (``_Helper()`` — a ``_Cls(...)`` construction, not a
+    bare class name): the receiver-class resolver (``_class_factory_receiver``) only ties a factory method to
+    its class when the receiver is a bare ``Name`` in ``classes``, so ``_Helper().create()`` is not resolved,
+    the read is not proven a constant, and the guard stays a real decision. The 'add a subtler mutant' ratchet
+    once ``nested-classmethod-cls-factory-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _Helper().create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    def check(self, action):\n"
+            f"        return {sym}().create()._ALWAYS\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _Helper().create().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -753,6 +809,16 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase(
             "nested-classmethod-cls-factory-hidden",
             _nested_classmethod_cls_factory_hidden(tok),
+            False,
+        ),
+        # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+        # itself is called on an INSTANCE (_Helper().create().val) — the receiver-class resolver only ties a
+        # factory method to its class when the receiver is a bare Name in classes, so _Helper() (a _Cls(...)
+        # construction) is not resolved, the read is not proven a constant, and the guard stays a real
+        # decision: the honest residual headroom once nested-classmethod-cls-factory-hidden is caught.
+        MutantCase(
+            "classmethod-instance-receiver-hidden",
+            _classmethod_instance_receiver_hidden(tok),
             False,
         ),
     ]

@@ -408,7 +408,12 @@ def _sibling_method_factory_receiver(
         if sub[0] is not None:
             return sub
     # Not a delegation; the sibling method directly constructs the class (or is not a resolvable factory).
-    ret_cls = _factory_return_class(method, classes, sources, _depth)
+    # A sibling `@classmethod` builds via `cls()` — thread the `cls` receiver through so `h = cls()` back
+    # in the base builder resolves to `class_def` (the class the factory is called on).
+    sib_cls_name: str | None = None
+    if _is_classmethod(method) and method.args.args:
+        sib_cls_name = method.args.args[0].arg
+    ret_cls = _factory_return_class(method, classes, sources, _depth, class_def, sib_cls_name)
     return (class_def, method) if ret_cls is not None else (None, None)
 
 
