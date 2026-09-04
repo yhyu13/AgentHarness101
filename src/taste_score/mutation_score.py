@@ -38,11 +38,16 @@ now ties back to the receiver class. This fire the resolver also threads the ``c
 classmethod→classmethod DELEGATION chain to the base builder, so ``nested-classmethod-cls-factory-hidden``
 (``create()`` returning ``_build()``, both ``@classmethod``) is now caught, AND it now ties a classmethod
 factory reached through an INSTANCE construction (``_Helper().create()`` — calling a ``@classmethod`` on an
-instance still passes the CLASS as ``cls``), so ``classmethod-instance-receiver-hidden`` is caught. The current
-residual headroom moved one ratchet step deeper to ``factory-instance-receiver-hidden``: a constant returned
-through an instance reached by a CLASSMETHOD factory CALLED ON AN INSTANCE RETURNED BY A FACTORY FUNCTION
-(``_make().create().val`` — ``_make()`` is a module-level factory function, not a class name and not a
-``_Cls(...)`` construction, which the receiver-class resolver cannot tie to a class). Each
+instance still passes the CLASS as ``cls``), so ``classmethod-instance-receiver-hidden`` is caught, AND it now
+ties a classmethod factory reached through an instance RETURNED BY A FACTORY FUNCTION
+(``_make().create().val`` — ``_make()`` is a module-level factory function, neither a class name nor a
+``_Cls(...)`` construction, which the receiver-class resolver now resolves to its single statically-known
+return class), so ``factory-instance-receiver-hidden`` is caught. The current residual headroom moved one
+ratchet step deeper to ``factory-clsattr-delegation-hidden``: a constant returned through an instance reached
+by a CLASSMETHOD factory CALLED ON AN INSTANCE RETURNED BY A FACTORY FUNCTION where the classmethod DELEGATES
+to a SIBLING classmethod VIA THE ``cls`` receiver (``_make().create().val`` where ``create`` does
+``return cls.build()``) — the classmethod→classmethod delegation resolver follows a bare-Name sibling call but
+not an attribute on the ``cls`` receiver, so the read is not proven a constant. Each
 ratchet step is: catch this level, add a subtler one.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
@@ -781,6 +786,76 @@ def _factory_instance_receiver_hidden(token: str) -> str:
     )
 
 
+def _factory_clsattr_delegation_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory
+    that is called on an instance returned by a FACTORY FUNCTION, where the classmethod DELEGATES to
+    a SIBLING classmethod VIA THE ``cls`` RECEIVER (``_make().create().val`` — ``create`` does
+    ``return cls.build()``). Once the resolver ties a classmethod factory reached through a factory
+    function's return (``_make().create()``), the next honest headroom is a factory-returned
+    classmethod whose return class is only reachable through a ``cls``-attribute DELEGATION: the
+    resolver follows a classmethod→classmethod delegation chain ONLY when the return expr is a bare
+    Name call (``create()`` returns ``_build()``), NOT when it is an attribute on the ``cls`` receiver
+    (``return cls.build()``). So the read is not proven a constant, and the guard stays a real
+    decision. The 'add a subtler mutant' ratchet once ``factory-instance-receiver-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return cls.build()\n"
+            "def _make():\n"
+            "    return _Helper()\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _make().create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return cls.build()\n"
+            "    def check(self, action):\n"
+            "        return _make().create()._ALWAYS\n"
+            "def _make():\n"
+            f"    return {sym}()\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return cls.build()\n"
+        "def _make():\n"
+        "    return _Helper()\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _make().create().val\n"
+    )
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -895,6 +970,18 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase(
             "factory-instance-receiver-hidden",
             _factory_instance_receiver_hidden(tok),
+            False,
+        ),
+        # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory
+        # called on an instance returned by a FACTORY FUNCTION, where the classmethod DELEGATES to a
+        # SIBLING classmethod VIA THE `cls` RECEIVER (_make().create().val where create does
+        # `return cls.build()`) — the classmethod→classmethod delegation resolver follows a bare-Name
+        # sibling call (`create() returns _build()`) but NOT an attribute on the `cls` receiver, so the
+        # read is not proven a constant and the guard stays a real decision: the honest residual
+        # headroom once factory-instance-receiver-hidden is caught.
+        MutantCase(
+            "factory-clsattr-delegation-hidden",
+            _factory_clsattr_delegation_hidden(tok),
             False,
         ),
     ]

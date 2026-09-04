@@ -456,6 +456,21 @@ def _class_factory_receiver(
         cls = classes[recv.id]
     elif isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) and recv.func.id in classes:
         cls = classes[recv.func.id]
+    elif (
+        isinstance(recv, ast.Call)
+        and isinstance(recv.func, ast.Name)
+        and sources
+        and recv.func.id in sources
+    ):
+        # A classmethod factory reached through an INSTANCE returned by a FACTORY FUNCTION
+        # (``_make().create()``): ``_make()`` is a module-level factory, neither a class name nor a
+        # ``_Cls(...)`` construction, so the receiver-class resolver above could not tie ``create()``
+        # to a class. Resolve the factory function's single statically-known return class, then tie
+        # the classmethod to it. Anti-over-rejection: only a factory whose return class is provably
+        # single is resolved; a factory returning a decision guard stays ``None`` (not resolved).
+        cls = _factory_return_class(sources[recv.func.id], classes, sources, _depth)
+        if cls is None:
+            return None, None
     else:
         return None, None
     method = _find_method(cls, value.func.attr)
