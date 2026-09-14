@@ -782,3 +782,22 @@ class TestGoalLoopRunner:
         )
         resumed._thread_id = "../thread"
         assert resumed._load_state().current_round == runner.state.current_round
+
+    def test_load_state_is_safe_before_the_loop_has_run(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        """A runner queried before run() has no thread id. The raw f-string tolerated
+        that (it looked for 'None.loop_state.json' and missed); routing the id through
+        the sanitizer turns it into a TypeError unless the guard is restored."""
+        runner = GoalLoopRunner(
+            make_spec(criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')]),
+            runtime,
+            EchoMaker("implemented"),
+            StaticChecker(Verdict.PASS),
+            state_dir=tmp_path / "state",
+        )
+
+        state = runner._load_state()
+
+        assert state.current_round == 0
+        assert state.loop_name == runner._spec.objective

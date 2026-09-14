@@ -101,6 +101,8 @@ class GoalLoopRunner:
         path.write_text(json.dumps(self._state.to_dict(), indent=2), encoding="utf-8")
 
     def _load_state(self) -> LoopState:
+        if self._thread_id is None:
+            return LoopState(loop_name=self._spec.objective)
         path = self._state_dir / f"{_safe_id(self._thread_id)}.loop_state.json"
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
