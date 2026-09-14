@@ -141,3 +141,39 @@ def test_compete_proposes_amendments_from_real_rejections(tmp_path: Path) -> Non
     for amendment in ledger["amendments"]:
         assert amendment["principle_id"]
         assert amendment["action"] == "tighten_pattern"
+
+
+def test_rank_vetoes_an_agent_that_trips_a_regression() -> None:
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    golden = build_initial_probes(constitution=real)
+
+    def regress(name: str) -> list[str]:
+        return ["sandbox"] if name == "robust" else []
+
+    result = rank(
+        build_demo_agents(), golden=golden, mutants=[],
+        pinned_digest=real.digest(), constitution=real, regress=regress,
+    )
+
+    by_agent = {r["agent"]: r for r in result["ranking"]}
+    assert by_agent["robust"]["rejected"] is True
+    assert by_agent["robust"]["reason"] == "regression: sandbox"
+
+
+def test_compete_forwards_a_regression_callback(tmp_path: Path) -> None:
+    import json
+
+    from taste_score.__main__ import compete
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    out = tmp_path / "ledger.json"
+
+    def regress(name: str) -> list[str]:
+        return ["red-line"] if name == "liar" else []
+
+    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=real,
+            pin=real.digest(), regress=regress)
+
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    liar = next(r for r in ledger["nights"][0]["ranking"] if r["agent"] == "liar")
+    assert liar["reason"] == "regression: red-line"
