@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+import pytest
+
 from taste_score import (
     Mutator,
     PairwiseJudge,
@@ -382,8 +384,20 @@ def test_ratify_blocks_must_level_and_regression() -> None:
     assert ratify(am, regress=lambda pid: []) is True
 
 
-def test_compete_with_constitution_pins_digest_and_reports_amendments(tmp_path: Path) -> None:
+def test_compete_with_constitution_pins_digest_and_reports_amendments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from taste_score.constitution import DEFAULT_CONSTITUTION, load_constitution
+    from taste_score.pin import ENV_VAR
+
+    # compete() is called without a pin here, so it takes read_pin()'s env -> file
+    # fallback. An exported AH_CONSTITUTION_PIN makes that fallback something other
+    # than the honest digest, every agent comes back vetoed, and every assertion below
+    # still passes: the recorded digest is still the honest one, csdd_score is still
+    # 1.0, and "amendments" is a key-presence check an empty list satisfies. Measured:
+    # env unset -> 1/3 rejected, 1 amendment; env=deadbeef -> 3/3 rejected, 0
+    # amendments, same green. Clear it so the run below is the run this test names.
+    monkeypatch.delenv(ENV_VAR, raising=False)
 
     out = tmp_path / "ledger.json"
     constitution = load_constitution(DEFAULT_CONSTITUTION)

@@ -83,9 +83,12 @@ def test_harness_layers_demo_runs_from_clean_cwd(tmp_path: Path) -> None:
         # stdout with the locale codec (cp936 here) and forcing utf-8 breaks the decode.
         # Pinning utf-8 is for the two git children in test_taste_score_constitution.py
         # -- and even there it is that specific call, not git in general: `git ls-files`
-        # emits ASCII escapes unless core.quotepath is off. General-purpose execution
-        # layers (sandbox.py, goal_loop/verifier.py) run children of unknown encoding
-        # and want errors="replace", not a pin.
+        # emits ASCII escapes unless core.quotepath is off. The general-purpose
+        # execution layers (sandbox.py, goal_loop/verifier.py) run children of unknown
+        # encoding, where neither a pin nor errors="replace" is right: a pin breaks the
+        # cp936 child, and "replace" decays real bytes to U+FFFD in output that callers
+        # compare for equality (tests/test_harness_layers.py:85) -- a silent wrong
+        # answer, where today's code at least fails loudly.
         timeout=120,
     )
     assert proc.returncode == 0, f"demo failed:\n{proc.stdout}\n{proc.stderr}"
