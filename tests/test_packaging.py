@@ -81,7 +81,11 @@ def test_harness_layers_demo_runs_from_clean_cwd(tmp_path: Path) -> None:
         text=True,
         # Deliberately no encoding=: this child is a Python process, so it encodes its
         # stdout with the locale codec (cp936 here) and forcing utf-8 breaks the decode.
-        # Only children that always emit utf-8 regardless of locale (git) need pinning.
+        # Pinning utf-8 is for the two git children in test_taste_score_constitution.py
+        # -- and even there it is that specific call, not git in general: `git ls-files`
+        # emits ASCII escapes unless core.quotepath is off. General-purpose execution
+        # layers (sandbox.py, goal_loop/verifier.py) run children of unknown encoding
+        # and want errors="replace", not a pin.
         timeout=120,
     )
     assert proc.returncode == 0, f"demo failed:\n{proc.stdout}\n{proc.stderr}"

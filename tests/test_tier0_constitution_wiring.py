@@ -10,9 +10,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from taste_score.__main__ import build_demo_agents, rank
 from taste_score.constitution import DEFAULT_CONSTITUTION, load_constitution
+from taste_score.pin import ENV_VAR, read_pin
 from taste_score.source import build_initial_probes
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_pin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Normalize ``read_pin()``'s fallback so ``--pin`` is the only free variable.
+
+    ``read_pin()`` resolves env -> ``constitution.pin`` -> ``None``, and
+    ``AH_CONSTITUTION_PIN`` is the documented first-choice entry point
+    (``__main__.py``'s ``--help``). Leave it set and the fallback stops being the
+    repo's honest digest -- which flips the two CLI tests below into passing through
+    the environment instead of through the flag, so they survive a
+    ``pin=args.pin -> pin=None`` mutation. Clearing it here makes the fallback land
+    on the repo's ``constitution.pin``, which
+    ``test_shipped_pin_matches_shipped_constitution`` pins to the honest digest.
+    """
+    monkeypatch.delenv(ENV_VAR, raising=False)
 
 
 def _tampered(tmp_path: Path) -> Path:
@@ -136,18 +155,24 @@ def _run_cli(constitution_path: Path, pin: str, out: Path) -> list[dict]:
 
 
 def test_cli_pin_flag_vetoes_a_ruler_the_pin_does_not_name(tmp_path: Path) -> None:
-    """End-to-end through ``main()``: a pin that names no real ruler vetoes the run
-    even though the constitution on disk is the honest one.
+    """End-to-end through ``main()``: a ``--pin`` holding a digest no ruler has vetoes
+    the run, even though the constitution on disk is the honest one.
 
-    This is the direction that makes the flag load-bearing. Drop ``--pin`` in
-    ``main()`` and the ``read_pin()`` fallback hands back the honest digest, the veto
-    never fires, and the assertions below fail. Pinning the *honest* digest reaches
-    the same verdict through that fallback, so it cannot tell the flag apart from it;
-    the test below walks the opposite outcome instead.
+    A pin is an opaque expected digest, not a path -- ``gate.py`` never resolves it,
+    it only compares it to ``constitution.digest()`` -- so this sentinel vetoes every
+    agent. Drop ``--pin`` in ``main()`` and the ``read_pin()`` fallback takes over:
+    with the ambient env cleared by ``_no_ambient_pin`` that fallback is the honest
+    digest, the veto never fires, and the assertions below fail. Pinning the *honest*
+    digest reaches the same verdict through the fallback, so it cannot tell the flag
+    apart from it; the test below walks the opposite direction instead.
     """
     real = load_constitution(DEFAULT_CONSTITUTION)
     wrong_pin = "0" * 64
     assert wrong_pin != real.digest(), "fixture is stale: the sentinel is a real digest"
+    # The discrimination above rests on the fallback being the honest digest; state it
+    # so that if it ever stops holding (a pin exported past the fixture, a rewritten
+    # constitution.pin) this fails loudly here instead of quietly passing below.
+    assert read_pin() == real.digest(), "fallback pin is not the honest digest"
 
     ranking = _run_cli(DEFAULT_CONSTITUTION, wrong_pin, tmp_path / "ledger.json")
 
@@ -162,9 +187,10 @@ def test_cli_pin_flag_is_what_the_ruler_is_compared_against(tmp_path: Path) -> N
     scoreable again, because the veto compares the loaded digest against ``--pin``
     rather than against the repo's ``constitution.pin``.
 
-    Dropping ``--pin`` in ``main()`` fails this test too — the fallback hands back the
-    repo's real digest, which the tampered file no longer matches, so every agent
-    comes back vetoed. The two tests pin the two directions; neither is redundant.
+    Dropping ``--pin`` in ``main()`` fails this test too: whatever the fallback hands
+    back, the tampered file no longer matches it, so every agent comes back vetoed and
+    the assertion below fails. The two tests pin the two directions; neither is
+    redundant.
     """
     tampered_path = _tampered(tmp_path)
     tampered = load_constitution(tampered_path)

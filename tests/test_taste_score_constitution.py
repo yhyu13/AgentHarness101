@@ -169,8 +169,11 @@ def test_every_anchor_resolves_to_a_tracked_git_file() -> None:
         ["git", "-C", str(ROOT), "ls-files"],
         capture_output=True,
         text=True,
-        # Same locale trap as _constitution_at_git_head: a non-ASCII path would decode
-        # with cp936 and silently turn stdout into None.
+        # Belt-and-braces, not a red fix: this call is green on the default config even
+        # without the pin. ``git ls-files`` only emits raw non-ASCII path bytes under
+        # ``core.quotepath=false``; the default quotes them into ASCII escapes, which
+        # cp936 decodes fine. Pin the decode anyway, so this file has one rule for its
+        # git children instead of a rule that silently depends on a git config.
         encoding="utf-8",
     )
     if repo.returncode != 0:
