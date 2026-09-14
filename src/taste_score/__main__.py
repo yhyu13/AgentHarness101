@@ -88,11 +88,14 @@ def rank(
     *,
     verify: object | None = None,
     pinned_digest: str | None = None,
+    constitution: object | None = None,
 ) -> dict:
     """Run the gate and return a serializeable ranking from the TasteScores."""
     verify = verify if verify is not None else build_demo_verify()
     gate = TasteGate(pinned_digest=pinned_digest)
-    scores = gate.score(agents, golden=golden, mutants=mutants, verify=verify)
+    scores = gate.score(
+        agents, golden=golden, mutants=mutants, verify=verify, constitution=constitution
+    )
     ranking = [
         {
             "agent": name,
@@ -128,7 +131,7 @@ def compete(
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
         result = rank(
             build_demo_agents(), golden=golden, mutants=menu,
-            verify=gate_verify, pinned_digest=pinned,
+            verify=gate_verify, pinned_digest=pinned, constitution=constitution,
         )
         result["night"] = night
         result["seed"] = nseed
