@@ -5,12 +5,14 @@ These exercise the durable goal_persistence layer directly (store + runtime) wit
 throwaway SQLite DB, isolating the resilience affordances from the LLM boundary.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
 
 from goal_persistence import GoalRuntime, GoalStatus, GoalStore
+from goal_persistence.models import Goal, Usage
 
 
 @pytest.fixture
@@ -143,3 +145,53 @@ class TestQuarantine:
         goal = runtime.unquarantine("t1")
         assert goal.status == GoalStatus.ACTIVE
         assert [c.thread_id for c in runtime.resume_all()] == ["t1"]
+
+
+def test_transition_reads_and_writes_on_one_connection(tmp_path: Path) -> None:
+    """A read-modify-write that spans two connections can interleave with another
+    writer and lose an update. One connection per transition is the property that
+    makes it atomic — and it is the property the current code does not have."""
+    store = GoalStore(tmp_path / "goals.db")
+    store.create(Goal(thread_id="t1", objective="o"))
+
+    opens = 0
+    original = store._connect
+
+    @contextmanager
+    def counting():
+        nonlocal opens
+        opens += 1
+        with original() as conn:
+            yield conn
+
+    store._connect = counting
+    store.transition("t1", GoalStatus.PAUSED, reason="held")
+    assert opens == 1, f"transition opened {opens} connections; read-modify-write is not atomic"
+
+
+def test_apply_usage_reads_and_writes_on_one_connection(tmp_path: Path) -> None:
+    store = GoalStore(tmp_path / "goals.db")
+    store.create(Goal(thread_id="t1", objective="o"))
+
+    opens = 0
+    original = store._connect
+
+    @contextmanager
+    def counting():
+        nonlocal opens
+        opens += 1
+        with original() as conn:
+            yield conn
+
+    store._connect = counting
+    store.apply_usage("t1", Usage(tokens_output=5))
+    assert opens == 1, f"apply_usage opened {opens} connections; read-modify-write is not atomic"
+
+
+def test_sqlite_runs_in_wal_mode(tmp_path: Path) -> None:
+    """WAL lets a reader proceed while a writer holds the file, which is what keeps
+    the single-connection transaction from serialising on the next caller."""
+    store = GoalStore(tmp_path / "goals.db")
+    with store._connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"

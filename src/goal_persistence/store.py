@@ -94,6 +94,10 @@ class GoalStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
+            # WAL lets a reader proceed while a writer holds the file, so the
+            # single-connection transactions below don't serialise on the next caller.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.executescript(SCHEMA)
             conn.commit()
 
@@ -129,46 +133,62 @@ class GoalStore:
             ).fetchone()
         return _row_to_goal(row) if row else None
 
+    def _persist_on(self, conn: sqlite3.Connection, goal: Goal) -> None:
+        """Write the row on a caller-supplied connection (no commit — the caller owns it)."""
+        conn.execute(
+            """
+            UPDATE thread_goals SET
+                objective = ?, status = ?, budget_tokens = ?, budget_wall_ms = ?,
+                usage = ?, blocked_count = ?, last_blocked_reason = ?,
+                updated_at = ?
+            WHERE thread_id = ?
+            """,
+            (
+                goal.objective,
+                goal.status.value,
+                goal.budget_tokens,
+                goal.budget_wall_ms,
+                _serialize_usage(goal.usage),
+                goal.blocked_count,
+                goal.last_blocked_reason,
+                goal.updated_at.isoformat(),
+                goal.thread_id,
+            ),
+        )
+
     def _persist(self, goal: Goal) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE thread_goals SET
-                    objective = ?, status = ?, budget_tokens = ?, budget_wall_ms = ?,
-                    usage = ?, blocked_count = ?, last_blocked_reason = ?,
-                    updated_at = ?
-                WHERE thread_id = ?
-                """,
-                (
-                    goal.objective,
-                    goal.status.value,
-                    goal.budget_tokens,
-                    goal.budget_wall_ms,
-                    _serialize_usage(goal.usage),
-                    goal.blocked_count,
-                    goal.last_blocked_reason,
-                    goal.updated_at.isoformat(),
-                    goal.thread_id,
-                ),
-            )
+            self._persist_on(conn, goal)
             conn.commit()
 
     def transition(
         self, thread_id: str, new_status: GoalStatus, reason: Optional[str] = None
     ) -> Goal:
-        goal = self.get(thread_id)
-        if goal is None:
-            raise KeyError(f"Goal not found for thread {thread_id}")
-        goal.with_status(new_status, reason=reason)
-        self._persist(goal)
+        # Read and write on ONE connection: a read on connection A followed by a
+        # write on connection B can interleave with another writer and lose an update.
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM thread_goals WHERE thread_id = ?", (thread_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Goal not found for thread {thread_id}")
+            goal = _row_to_goal(row)
+            goal.with_status(new_status, reason=reason)
+            self._persist_on(conn, goal)
+            conn.commit()
         return goal
 
     def apply_usage(self, thread_id: str, delta: Usage) -> Goal:
-        goal = self.get(thread_id)
-        if goal is None:
-            raise KeyError(f"Goal not found for thread {thread_id}")
-        goal.apply_usage(delta)
-        self._persist(goal)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM thread_goals WHERE thread_id = ?", (thread_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Goal not found for thread {thread_id}")
+            goal = _row_to_goal(row)
+            goal.apply_usage(delta)
+            self._persist_on(conn, goal)
+            conn.commit()
         return goal
 
     def save(self, goal: Goal) -> Goal:
