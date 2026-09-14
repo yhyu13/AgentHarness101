@@ -736,3 +736,49 @@ class TestGoalLoopRunner:
         status = runner.run_until_terminal("t1")
         assert status == GoalStatus.BLOCKED
         assert runtime.get_goal("t1").status == GoalStatus.BLOCKED
+
+    def test_thread_id_cannot_escape_the_state_dir(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        """A thread_id is caller-supplied. Writing it straight into a filename lets
+        '../../escape' drop the loop state two directories above the state dir."""
+        state_dir = tmp_path / "state"
+        runner = GoalLoopRunner(
+            make_spec(criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')]),
+            runtime,
+            EchoMaker("implemented"),
+            StaticChecker(Verdict.PASS),
+            state_dir=state_dir,
+        )
+
+        runner.run("../../escape")
+
+        assert not (state_dir / ".." / ".." / "escape.loop_state.json").resolve().exists()
+        assert (state_dir / ".._.._escape.loop_state.json").exists()
+
+    def test_resume_reads_the_state_file_the_writer_wrote(
+        self, runtime: GoalRuntime, tmp_path: Path
+    ) -> None:
+        """Write and read must agree on the sanitized filename. If only the writer
+        sanitized, resume silently starts from scratch — trading a path traversal
+        for a state loss, which is worse."""
+        state_dir = tmp_path / "state"
+        spec = make_spec(
+            criteria=[AcceptanceCriterion("c1", "pass", verify_command='py -c "pass"')]
+        )
+        runner = GoalLoopRunner(
+            spec, runtime, EchoMaker("implemented"), StaticChecker(Verdict.PASS),
+            state_dir=state_dir,
+        )
+        runner.run("../thread")
+
+        assert sorted(p.name for p in state_dir.glob("*.loop_state.json")) == [
+            ".._thread.loop_state.json"
+        ]
+
+        resumed = GoalLoopRunner(
+            spec, runtime, EchoMaker("implemented"), StaticChecker(Verdict.PASS),
+            state_dir=state_dir,
+        )
+        resumed._thread_id = "../thread"
+        assert resumed._load_state().current_round == runner.state.current_round

@@ -31,6 +31,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _safe_id(raw: str) -> str:
+    """A thread id reduced to a single safe filename component.
+
+    ``thread_id`` is caller-supplied and lands in a path, so anything that is not
+    alphanumeric (or ``- _ .``) becomes ``_``. The hippocampus trajectory id already
+    used this rule; both go through here so they cannot drift.
+    """
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in raw)
+
+
 class GoalLoopRunner:
     """Orchestrate the goal loop on top of the durable ``goal_persistence`` runtime.
 
@@ -87,11 +97,11 @@ class GoalLoopRunner:
         if self._thread_id is None:
             return
         self._state_dir.mkdir(parents=True, exist_ok=True)
-        path = self._state_dir / f"{self._thread_id}.loop_state.json"
+        path = self._state_dir / f"{_safe_id(self._thread_id)}.loop_state.json"
         path.write_text(json.dumps(self._state.to_dict(), indent=2), encoding="utf-8")
 
     def _load_state(self) -> LoopState:
-        path = self._state_dir / f"{self._thread_id}.loop_state.json"
+        path = self._state_dir / f"{_safe_id(self._thread_id)}.loop_state.json"
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             return LoopState.from_dict(data)
@@ -232,10 +242,7 @@ class GoalLoopRunner:
                     {"round": round_number, "verdict": checker_output.verdict.value},
                 )
             if self._hippocampus is not None:
-                traj_id = "".join(
-                    c if c.isalnum() or c in "-_." else "_"
-                    for c in f"{thread_id}-round-{round_number}"
-                )
+                traj_id = _safe_id(f"{thread_id}-round-{round_number}")
                 traj = self._hippocampus.start_trajectory(traj_id)
                 important = checker_output.issues[0].description if checker_output.issues else ""
                 self._hippocampus.record_step(
