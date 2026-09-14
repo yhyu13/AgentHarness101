@@ -87,6 +87,10 @@ class GoalStore:
     def _connect(self):
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
+        # busy_timeout is per-connection state, so it belongs here rather than on the
+        # short-lived connection in _ensure_schema where it would be inert. It is what
+        # makes a contended BEGIN IMMEDIATE wait for the lock instead of failing at once.
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
         finally:
@@ -97,7 +101,6 @@ class GoalStore:
             # WAL lets a reader proceed while a writer holds the file, so the
             # single-connection transactions below don't serialise on the next caller.
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
             conn.executescript(SCHEMA)
             conn.commit()
 
@@ -164,9 +167,11 @@ class GoalStore:
     def transition(
         self, thread_id: str, new_status: GoalStatus, reason: Optional[str] = None
     ) -> Goal:
-        # Read and write on ONE connection: a read on connection A followed by a
-        # write on connection B can interleave with another writer and lose an update.
+        # BEGIN IMMEDIATE takes the write lock before the read, so the SELECT and the
+        # UPDATE are one transaction no other writer can interleave between. Without
+        # it the SELECT would run in autocommit and the lock would come too late.
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM thread_goals WHERE thread_id = ?", (thread_id,)
             ).fetchone()
@@ -180,6 +185,7 @@ class GoalStore:
 
     def apply_usage(self, thread_id: str, delta: Usage) -> Goal:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")  # hold the write lock across the read-modify-write
             row = conn.execute(
                 "SELECT * FROM thread_goals WHERE thread_id = ?", (thread_id,)
             ).fetchone()

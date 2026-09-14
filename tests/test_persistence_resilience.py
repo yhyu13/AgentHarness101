@@ -149,8 +149,9 @@ class TestQuarantine:
 
 def test_transition_reads_and_writes_on_one_connection(tmp_path: Path) -> None:
     """A read-modify-write that spans two connections can interleave with another
-    writer and lose an update. One connection per transition is the property that
-    makes it atomic — and it is the property the current code does not have."""
+    writer and lose an update, so it must be one connection. One connection is
+    necessary but not sufficient: the write lock must also be taken before the read,
+    which is pinned separately by test_transition_takes_the_write_lock_before_it_reads."""
     store = GoalStore(tmp_path / "goals.db")
     store.create(Goal(thread_id="t1", objective="o"))
 
@@ -195,3 +196,52 @@ def test_sqlite_runs_in_wal_mode(tmp_path: Path) -> None:
     with store._connect() as conn:
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
+
+
+def test_transition_takes_the_write_lock_before_it_reads(tmp_path: Path) -> None:
+    """The write lock must be taken BEFORE the SELECT. With the default
+    isolation_level the SELECT runs in autocommit, so the lock is only taken at
+    the UPDATE — too late, and a concurrent writer can interleave in between."""
+    store = GoalStore(tmp_path / "goals.db")
+    store.create(Goal(thread_id="t1", objective="o"))
+
+    seen: list[str] = []
+    original = store._connect
+
+    @contextmanager
+    def recording():
+        with original() as conn:
+            conn.set_trace_callback(seen.append)
+            yield conn
+            conn.set_trace_callback(None)
+
+    store._connect = recording
+    store.transition("t1", GoalStatus.PAUSED, reason="held")
+
+    statements = [sql.strip().upper() for sql in seen]
+    began = next(i for i, sql in enumerate(statements) if sql.startswith("BEGIN IMMEDIATE"))
+    updated = next(i for i, sql in enumerate(statements) if sql.startswith("UPDATE"))
+    assert began < updated, f"the write lock must precede the UPDATE; saw {statements}"
+
+
+def test_apply_usage_takes_the_write_lock_before_it_reads(tmp_path: Path) -> None:
+    store = GoalStore(tmp_path / "goals.db")
+    store.create(Goal(thread_id="t1", objective="o"))
+
+    seen: list[str] = []
+    original = store._connect
+
+    @contextmanager
+    def recording():
+        with original() as conn:
+            conn.set_trace_callback(seen.append)
+            yield conn
+            conn.set_trace_callback(None)
+
+    store._connect = recording
+    store.apply_usage("t1", Usage(tokens_output=5))
+
+    statements = [sql.strip().upper() for sql in seen]
+    began = next(i for i, sql in enumerate(statements) if sql.startswith("BEGIN IMMEDIATE"))
+    updated = next(i for i, sql in enumerate(statements) if sql.startswith("UPDATE"))
+    assert began < updated, f"the write lock must precede the UPDATE; saw {statements}"
