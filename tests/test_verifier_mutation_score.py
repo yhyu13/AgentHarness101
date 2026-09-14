@@ -1382,15 +1382,15 @@ def test_non_code_fakes_model_the_cheater_that_deletes_the_guard() -> None:
     For each rejected flavour the raw regex still matches the guard's name and the module is
     neither a shell nor an inert pass-through — so the only thing that can reject it is the
     evidence rule (not the dead-stub rule, not the inert rule: rejecting for the wrong reason
-    would deflate the measure instead of measuring it). Two containers are caught: PROSE (a
-    comment / a docstring, blanked by ``_code_only``) and DATA (an ordinary string literal,
-    kept by the code view on purpose, so the check is containment: a match that lies WHOLLY
-    inside a literal is not an implementation). The f-string flavour is the named, still-
-    blessed residual: its literal runs are ``FSTRING_MIDDLE`` tokens, not ``STRING``.
+    would deflate the measure instead of measuring it). Three containers are caught: PROSE (a
+    comment / a docstring, blanked by ``_code_only``) and DATA (an ordinary string literal, kept
+    by the code view on purpose, so the check is containment: a match that lies WHOLLY inside a
+    literal is not an implementation), and DATA's second container — the f-string's literal runs,
+    which tokenise as ``FSTRING_MIDDLE`` rather than ``STRING``.
     """
     p = _constitution().principles[0]  # SEC-01
     cases = {c.label: c for c in mutant_cases(p)}
-    for label in ("prose-comment", "prose-docstring", "string-hidden"):
+    for label in ("prose-comment", "prose-docstring", "string-hidden", "fstring-hidden"):
         case = cases[label]
         ast.parse(case.text)
         assert case.expected_genuine is False
@@ -1399,12 +1399,12 @@ def test_non_code_fakes_model_the_cheater_that_deletes_the_guard() -> None:
         assert not _is_inert_module(case.text), f"{label}: not an inert pass-through"
         run = TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
         assert run.did_expand is False, f"{label}: a name that is not code is not an implementation"
-    residual = cases["fstring-hidden"]
-    ast.parse(residual.text)
-    assert re.search(p.pattern, residual.text)
-    assert not _is_dead_stub(residual.text) and not _is_inert_module(residual.text)
-    run = TraceabilityVerifier.classify(p.pattern, p.violations, residual.text, p.id)
-    assert run.did_expand is True, "the f-string flavour stays the honest residual"
+    # What this rule CANNOT close is containment itself: a match that merely SPANS a literal is a
+    # decision made against a literal (SEC-02's ``risk == "high"``), so that shape must keep
+    # counting. That intrinsic residual is pinned by
+    # ``test_evidence_next_to_a_string_literal_still_counts_as_code``; the corpus residual left
+    # after this fire lives on the constant axis and is named in
+    # ``test_only_the_named_residual_families_stay_blessed``.
 
 
 def test_string_literal_evidence_is_rejected_for_every_principle() -> None:
@@ -1438,3 +1438,66 @@ def test_evidence_next_to_a_string_literal_still_counts_as_code() -> None:
     run = TraceabilityVerifier.classify("_HIGH_RISK_ACTIONS", p.violations, text, p.id, p.require)
     assert run.did_expand is True
     assert run.safe is True, "a require that spans a literal is still a code-backed property"
+
+
+def test_fstring_evidence_is_rejected_for_every_principle() -> None:
+    """Container #4 (the f-string family), measured per principle rather than on SEC-01 alone.
+
+    On Python 3.12+ an f-string is tokenised as ``FSTRING_START`` / ``FSTRING_MIDDLE`` /
+    ``FSTRING_END``, so its literal runs are NOT ``STRING`` tokens and used to slip past
+    ``_data_spans``: the cheater deletes the guard, keeps its name in an f-string next to real
+    logic, the raw regex still matches, neither shape rule fires — and the ruler credited an
+    expansion that is not in the code. Measured for every principle so a rule that only worked
+    for one token shape would be visible instead of averaged away.
+    """
+    for p in _constitution().principles:
+        case = next(c for c in mutant_cases(p) if c.label == "fstring-hidden")
+        ast.parse(case.text)
+        assert re.search(p.pattern, case.text), f"{p.id}: the raw regex must still see the name"
+        assert not _is_dead_stub(case.text), f"{p.id}: not a shell"
+        assert not _is_inert_module(case.text), f"{p.id}: not an inert pass-through"
+        run = TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
+        assert run.did_expand is False, (
+            f"{p.id}: an f-string's literal run is data, not an implementation"
+        )
+
+
+def test_fstring_literal_run_is_data_while_its_expression_is_code() -> None:
+    """Anti-over-rejection for container #4: only the f-string TEXT is data, never its expression.
+
+    Naming the f-string tokens in ``_data_spans`` must not swallow the replacement field: a real
+    guard can build a string out of a live value (``f"{decision}"``), and reading that expression
+    as data would reject genuine implementations. Asserted on the spans directly, so the rule's
+    shape is pinned rather than only its effect on one fake.
+    """
+    from taste_score.trace import _code_only, _data_spans, _evidence
+
+    text = (
+        'def _guard(p):\n    _note = f"{_WITNESS} allows_write"\n    return p in _allowed_roots\n'
+    )
+    code = _code_only(text)
+    data = _data_spans(text)
+    assert not _evidence("allows_write", code, data), "the literal RUN of an f-string is data"
+    assert _evidence("_WITNESS", code, data), "a name inside the braces is code, not data"
+
+
+def test_only_the_named_residual_families_stay_blessed() -> None:
+    """Corpus ratchet: the blessed set is EXACTLY the named residual, so the next one is visible.
+
+    A verifier that blessed nothing would satisfy the non-saturation test for the wrong reason —
+    the corpus keeps one family the resolver genuinely cannot reach yet, and this test names it:
+    the constant axis's ``cls-arg-delegation-hidden`` (a ``cls`` receiver handed to a module-level
+    helper is not tracked as the class receiver). Pinning the set by NAME means catching that knot
+    forces this test red and a new, subtler residual to be added — the same ratchet discipline the
+    constant chain has followed at every level, applied to the corpus as a whole.
+    """
+    blessed = {
+        case.label
+        for p in _constitution().principles
+        for case in mutant_cases(p)
+        if (
+            run := TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
+        ).did_expand
+        and run.safe
+    }
+    assert blessed == {"cls-arg-delegation-hidden"}, f"blessed families moved: {sorted(blessed)}"

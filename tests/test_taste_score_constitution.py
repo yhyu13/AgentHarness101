@@ -817,3 +817,31 @@ def test_verifier_calls_a_string_literal_only_guard_unimplemented(tmp_path: Path
         C(version=shipped.version, principles=(replace(princ, anchor=str(stub)),))
     ).matrix()
     assert rows[0]["expanded"] is False, "a name parked in a string is not an implementation"
+
+
+def test_verifier_calls_an_fstring_only_guard_unimplemented(tmp_path: Path) -> None:
+    """End-to-end through ``matrix()``: container #4 — the name survives in an f-string's text.
+
+    On Python 3.12+ an f-string's literal runs tokenise as ``FSTRING_MIDDLE``, not ``STRING``, so
+    before the data spans named them a cheater could delete the guard, keep its name in an
+    f-string next to real logic, and the engine's OWN ``matrix()`` still reported the boundary as
+    implemented. The raw regex still matches here, so the rejection is attributable to the data
+    rule rather than to the name being absent.
+    """
+    from dataclasses import replace
+
+    from taste_score.constitution import Constitution as C
+    from taste_score.trace import TraceabilityVerifier
+
+    shipped = load_constitution(DEFAULT_CONSTITUTION)
+    princ = next(p for p in shipped.principles if p.id == "SEC-01")
+    stub_text = (
+        'def _guard(p, roots):\n    _note = f"allows_write is enforced"\n    return p in roots\n'
+    )
+    assert re.search(princ.pattern, stub_text), "the raw regex must still see the name"
+    stub = tmp_path / "path_policy_fstring_only.py"
+    stub.write_text(stub_text, encoding="utf-8")
+    rows = TraceabilityVerifier(
+        C(version=shipped.version, principles=(replace(princ, anchor=str(stub)),))
+    ).matrix()
+    assert rows[0]["expanded"] is False, "a name borne by f-string text is not an implementation"

@@ -128,8 +128,25 @@ def _line_starts(text: str) -> list[int]:
     return starts
 
 
+# The token types whose text is DATA rather than code. Python 3.12+ splits an f-string into
+# ``FSTRING_START`` / ``FSTRING_MIDDLE`` / ``FSTRING_END``, so its literal runs are NOT ``STRING``
+# tokens; naming them here is what closes the container a cheater's name could otherwise survive
+# in. The ``getattr`` guards keep pre-3.12 interpreters working, where an f-string is a single
+# ``STRING`` token and therefore already data.
+_DATA_TOKEN_TYPES = frozenset(
+    token_type
+    for token_type in (
+        tokenize.STRING,
+        getattr(tokenize, "FSTRING_START", None),
+        getattr(tokenize, "FSTRING_MIDDLE", None),
+        getattr(tokenize, "FSTRING_END", None),
+    )
+    if token_type is not None
+)
+
+
 def _data_spans(text: str) -> list[tuple[int, int]]:
-    """Character-offset spans of every ordinary string/bytes LITERAL in ``text``.
+    """Character-offset spans of every DATA region of ``text``: string and f-string literals.
 
     These are the places where a symbol is DATA rather than code. ``_code_only`` blanks prose but
     KEEPS string literals on purpose (a real ``require`` can contain one, e.g. SEC-02's
@@ -138,10 +155,15 @@ def _data_spans(text: str) -> list[tuple[int, int]]:
     not in the code. The rule below is CONTAINMENT, not "no strings": a match that merely SPANS a
     literal is a decision made in code, a match that lies WHOLLY inside one is data.
 
+    The same cheater has a second container. An f-string's literal runs tokenize as
+    ``FSTRING_START`` / ``FSTRING_MIDDLE`` / ``FSTRING_END`` (Python 3.12+), not ``STRING``, so a
+    name left behind in ``f"allows_write is enforced"`` used to sit outside every span and be
+    credited as an implementation. ``_DATA_TOKEN_TYPES`` spans both containers; only the literal
+    runs are spanned, so an f-string's EXPRESSIONS stay code — a real guard that builds a message
+    from a live value is not judged data.
+
     Empty on unparseable text — the same fallback as ``_code_only`` / ``_is_dead_stub`` (a parser
-    hiccup must never reject a real source file). F-strings are deliberately NOT included: their
-    literal runs tokenize as ``FSTRING_MIDDLE``, not ``STRING``, so a name borne by an f-string is
-    the named, still-blessed residual of this rule.
+    hiccup must never reject a real source file).
     """
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
@@ -151,7 +173,7 @@ def _data_spans(text: str) -> list[tuple[int, int]]:
     return [
         (starts[tok.start[0] - 1] + tok.start[1], starts[tok.end[0] - 1] + tok.end[1])
         for tok in tokens
-        if tok.type == tokenize.STRING
+        if tok.type in _DATA_TOKEN_TYPES
     ]
 
 
@@ -1287,8 +1309,9 @@ class TraceabilityVerifier:
         and docstrings, keeping line structure and ordinary string literals). Matching raw text
         let a tamper satisfy the evidence with PROSE: delete the guard, leave its name in a
         comment or a docstring, and the ruler still credited the expansion and called it safe.
-        Evidence must also be found OUTSIDE an ordinary string literal (``_data_spans``): a name
-        parked in a string is DATA — the same deletion, a different container — so a match lying
+        Evidence must also be found OUTSIDE every DATA region (``_data_spans``: ordinary string
+        literals and the literal runs of an f-string): a name parked in a string or in the text of
+        ``f"...{value}"`` is DATA — the same deletion, a different container — so a match lying
         WHOLLY inside a literal does not count. A match that merely spans one still does (SEC-02's
         ``risk == "high"`` is a decision made against a literal, not a name hidden in one).
         ``violations`` stays on the raw text on purpose — that check is about ABSENCE, and a

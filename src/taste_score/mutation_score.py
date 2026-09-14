@@ -66,9 +66,19 @@ is read from the code-only view (``trace._code_only`` blanks comments and docstr
 the same cheater in the other non-code container: the name inside an ORDINARY string literal, which the
 code view keeps on purpose (a real ``require`` may contain one, e.g. SEC-02's ``risk == "high"``). So the
 rule has to be CONTAINMENT, not "no strings" (``trace._data_spans``: wholly inside a literal = data;
-merely spanning one = still code), and with that rule the string container is CAUGHT too. The residual
-moves one container further out to ``fstring-hidden``: an f-string's literal runs tokenize as
-``FSTRING_MIDDLE``, not ``STRING``, so they sit outside the data spans and the fake is honestly blessed.
+merely spanning one = still code), and with that rule the string container is CAUGHT too — as is the
+container one step further out, ``fstring-hidden``: an f-string's literal runs tokenize as
+``FSTRING_START`` / ``FSTRING_MIDDLE`` / ``FSTRING_END``, not ``STRING``, so they used to sit outside
+every data span while the raw regex still matched. ``trace._DATA_TOKEN_TYPES`` now ranges over that
+family too, which closes the container axis for every non-code container the tokenizer can name.
+
+What stays open is containment ITSELF: a match that SPANS a literal boundary is a decision made
+against a literal (SEC-02's ``risk == "high"`` needs exactly that shape), and distrusting it would gut
+the real constitution — so that shape keeps counting by design. That is why the corpus's surviving
+blessed residual is now the CONSTANT axis's ``cls-arg-delegation-hidden`` rather than a data container;
+the set is pinned by name in ``tests/test_verifier_mutation_score.py``
+(``test_only_the_named_residual_families_stay_blessed``), so closing that knot forces a new, subtler
+residual to be added instead of the measure silently saturating.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -1067,12 +1077,13 @@ def _string_hidden(token: str) -> str:
 
 
 def _fstring_hidden(token: str) -> str:
-    """The residual of the data rule: the name survives inside an F-STRING's literal text.
+    """The name survives inside an F-STRING's literal text — container #4, now CAUGHT.
 
-    An f-string's literal runs tokenize as ``FSTRING_MIDDLE``, not ``STRING``, so they fall outside
-    ``trace._data_spans`` and the raw regex still finds the name in the code view: the guard is still
-    blessed. That is the named next ratchet step (extend the data spans to the f-string family), not
-    a silent hole — the same 'catch this level, add a subtler one' discipline as the constant chain.
+    An f-string's literal runs tokenize as ``FSTRING_START`` / ``FSTRING_MIDDLE`` / ``FSTRING_END``,
+    not ``STRING``, so they used to fall outside ``trace._data_spans`` while the raw regex still
+    found the name in the code view: the guard was blessed. ``trace._DATA_TOKEN_TYPES`` now ranges
+    over that family, so the fake is rejected for the RIGHT reason — its name lives in data — not
+    because the name is absent or a shape rule fired. The f-string's EXPRESSIONS stay code.
     """
     literal = token.replace("\\", "").replace('"', "").replace("'", "")
     return f'def _guard(p):\n    _note = f"{literal} is enforced"\n    return p in _allowed_roots\n'
@@ -1236,10 +1247,11 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         # contain them) — so the rule is CONTAINMENT: a match lying WHOLLY inside a literal is data,
         # not an implementation. Now CAUGHT (`_data_spans`).
         MutantCase("string-hidden", _string_hidden(tok), False),
-        # Same cheater, container #3: the name survives inside an F-STRING's literal text. F-string
-        # literal runs tokenize as FSTRING_MIDDLE, not STRING, so they sit outside the data spans and
-        # this fake is still blessed: the honest residual of the data rule, and the next ratchet step
-        # (extend the data spans to the f-string family).
+        # Same cheater, container #4: the name survives inside an F-STRING's literal text. F-string
+        # literal runs tokenize as FSTRING_START/FSTRING_MIDDLE/FSTRING_END, not STRING, so they sat
+        # outside the data spans while the raw regex still matched — and this fake was blessed. Now
+        # CAUGHT (`trace._DATA_TOKEN_TYPES` covers the f-string family too); the f-string's
+        # EXPRESSIONS stay code, so a real guard building a message from a value is unaffected.
         MutantCase("fstring-hidden", _fstring_hidden(tok), False),
     ]
 
