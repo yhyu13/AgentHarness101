@@ -1,4 +1,11 @@
 version = "1.0.0"
+# `require` = positive sentinels: regexes that must be FOUND in the anchor. `pattern` proves
+# the guard symbol is present and `violations` proves no forbidden shape was ADDED — but a
+# tamper that only DELETES (keep the symbol, drop the deny branch / the rejection bit) leaves
+# both silent. `require` names the fail-closed OUTCOME that has to survive, so `safe` reads
+# as "the boundary is still enforced", not just "nothing obviously broken was added".
+# Entries are TOML LITERAL strings (single quotes): the regex is written verbatim, exactly
+# as `re.search` receives it, which removes the double-escaping trap of basic strings.
 
 [[principles]]
 id = "SEC-01"
@@ -9,6 +16,7 @@ constraint = "任何文件路径必须经 PathPolicy 白名单判定"
 anchor = "src/sandbox/path_policy.py"
 pattern = "allows_write|_is_within|allow_roots"
 violations = "write_text\\(|open\\([^)]*['\"]w"
+require = ['_is_within\(resolved, root\)']  # 允许判定须仍由包含性检查推出
 rationale = "路径穿越 / 任意写"
 
 [[principles]]
@@ -20,6 +28,7 @@ constraint = "高危动作须经 SafetyGuard 判定"
 anchor = "src/safety/safety.py"
 pattern = "class SafetyGuard|_HIGH_RISK_ACTIONS"
 violations = "os\\.system|subprocess\\.(call|Popen)"
+require = ['if risk == "high" or action in _HIGH_RISK_ACTIONS:']  # 高危动作不得被自动批准（须仍走 PENDING）
 rationale = "未授权高危操作"
 
 [[principles]]
@@ -31,6 +40,7 @@ constraint = "日志不得记录口令/令牌"
 anchor = "src/observability/trace.py"
 pattern = "def redact_value|_redact_text|redact_secrets"
 violations = "logging\\.info\\([^)]*(secret|token|password)"
+require = ['if self\._redact_secrets:\n\s*payload = redact_value\(payload\)']  # 落盘前须仍真的脱敏
 rationale = "敏感信息泄露"
 
 [[principles]]
@@ -42,6 +52,7 @@ constraint = "命令须经 CommandPolicy 白名单判定，禁 shell 字符串"
 anchor = "src/sandbox/command_policy.py"
 pattern = "class CommandPolicy|def allows_command"
 violations = "subprocess\\.(call|Popen|run)\\("
+require = ['isinstance\(command, str\):\n\s*return False']  # 裸 shell 字符串须仍被拒
 rationale = "命令注入 / 任意执行"
 
 [[principles]]
@@ -53,6 +64,7 @@ constraint = "检测并阻断覆盖 harness 权限门的注入指令"
 anchor = "src/security/injection_guard.py"
 pattern = "class InjectionGuard|def detect_injection"
 violations = "eval\\(|exec\\("
+require = ['any\(marker in lowered for marker in self\.markers\)']  # 检测体须仍真的扫 marker 集
 rationale = "提示注入 / 越权改指令"
 
 [[principles]]
@@ -64,6 +76,7 @@ constraint = "子进程环境只保留白名单键，禁裸传 os.environ（防 
 anchor = "src/sandbox/sandbox.py"
 pattern = "_SAFE_ENV_KEYS|def _safe_env"
 violations = "env=os\\.environ|env=dict\\(os\\.environ\\)|env=os\\.environ\\.copy"
+require = ['k in _SAFE_ENV_KEYS']  # 环境须仍按白名单键过滤
 rationale = "凭证/令牌经环境变量泄漏进子进程"
 
 [[principles]]
@@ -75,6 +88,7 @@ constraint = "验证命令须以 argv 列表执行（shell=False / shlex.split�
 anchor = "src/goal_loop/verifier.py"
 pattern = "class CommandVerifier|shell=False"
 violations = "shell=True|os\\.system"
+require = ['shlex\.split\(command\)', 'shell=False,']  # 字符串命令须仍 argv 化 + 无 shell 执行
 rationale = "shell 元字符注入（与 SEC-04 的白名单判定互补：白名单没变也可能退化成 shell=True 重新引入注入）"
 
 [[principles]]
@@ -86,6 +100,7 @@ constraint = "Sandbox.run 在未配置 allowlist 时必须拒绝执行（SANDBOX
 anchor = "src/sandbox/sandbox.py"
 pattern = "class Sandbox|def run"
 violations = "shell=True|os\\.system"
+require = ['if not self\.available:', 'if argv\[0\] not in self\._allowlist:']  # 默认拒绝 + 运行时白名单强制都须在场
 rationale = "执行层默认拒绝 + 运行时白名单强制：SEC-04 钉的是白名单判定（一个 sandbox.py 并未 import 的纯决策 helper），SEC-06 钉的只是环境脱敏。真正的 subprocess 启动点在 Sandbox.run——把 default-permit 或 shell=True 的回归钉住，否则该安全回归不会被任何原则登记"
 
 [[principles]]
@@ -97,6 +112,7 @@ constraint = "LLM 判定（LLMJudge）在超时/异常/不可解析回复时必�
 anchor = "src/eval_harness/judge.py"
 pattern = "class LLMJudge|Verdict.FAIL"
 violations = "except[^\\n]*Verdict\\.PASS|except[^\\n]*:\\n\\s*return[^\\n]*Verdict\\.PASS"
+require = ['except Exception[^\n]*\n(?:[^\n]*\n){0,6}\s*verdict=Verdict\.FAIL']  # 异常分支须仍以 FAIL 返回
 rationale = "评估层失败关闭：SEC-08 钉的是执行层（Sandbox 无 allowlist 即拒），SEC-09 钉的是同 CWE-703 的独立层——评估边界。LLM judge 超时/异常/不可解析回复只能 FAIL 不能 PASS，否则坏结果会穿过闸门。现有原则都锚 sandbox/safety/verifier/injection，看不到 judge.py 被改坏成 \"except: return PASS\" 的 fail-open 回归，必须钉住"
 [[principles]]
 id = "SEC-10"
@@ -107,6 +123,7 @@ constraint = "工具调用须先经权限门：权限未显式 enable 前一律�
 anchor = "src/tool_registry/registry.py"
 pattern = "permission not in self\\._enabled"
 violations = "except[^\\n]*ok=True|except[^\\n]*:\\n\\s*return[^\\n]*ok=True"
+require = ['except Exception as exc:[^\n]*\n\s*return ToolResult\(ok=False']  # handler 崩溃须仍 fail-closed
 rationale = "授权层最小权限：SEC-04/05/07/08 钉的是命令注入/提示注入/执行层，SEC-10 钉的是独立一层——工具调用授权边界。registered_roles.py 把 maker/checker 接在 ToolRegistry.call 的权限门上；若移除 `permission not in self._enabled` 门、反转成 `in`（fail-open 放行），或把 handler 异常吞成 ok=True（fail-open 吞错），现有原则都看不到（无一条锚 tool_registry）。必须钉住，否则该授权回归会零证据拿满分"
 
 [[principles]]
@@ -118,6 +135,7 @@ constraint = "LLM 调用启动前须经 guard_budget 判定：估算成本超 ma
 anchor = "src/cost_control/cost.py"
 pattern = "def guard_budget"
 violations = "except[^\\n]*BudgetError"
+require = ['if cost > max_usd:\n\s*raise BudgetError']  # 超预算须仍抛错拒绝启动
 rationale = "资源耗尽/无限消费：SEC-01..SEC-10 钉的是写隔离/注入/执行层/评估层/授权层，没一条锚 cost_control。guard_budget 是真实的 fail-closed 资源闸门（估算超预算即抛 BudgetError 拒绝启动），而 RateLimiter 限流、TokenLedger 记账都在 cost_control。若 agent 把 guard_budget 的调用包进 `except BudgetError: return cost`（吞错放行成继续执行）或移除预算上限，现有原则全看不到——那条资源失控回归会零证据拿满分（CWE-770 unbounded resource consumption）。必须钉住。"
 
 [[principles]]
@@ -129,6 +147,7 @@ constraint = "goal 完成判定须经 WorldVerifier 重读磁盘产物验证（b
 anchor = "src/goal_loop/world_verifier.py"
 pattern = "class WorldVerifier|def verify_all"
 violations = "except[^\\n]*ok=True|except[^\\n]*:\\n\\s*return[^\\n]*ok=True"
+require = ['if not result\.ok:\n\s*return result', 'if not path\.exists\(\):']  # 失败须短路返回 + 缺失须判失败
 rationale = "自述不可信的机器侧独立证据通道：SEC-01..SEC-11 钉的是写隔离/注入/执行/评估/授权/预算，没一条锚 world_verifier。WorldVerifier.verify_all 是真实的 fail-closed 完成守卫（把磁盘重读的字节当作唯一可信证据，任一 check 不过即 ok=False，missing/mismatch 都不当成完成）。若 agent 把验证包进 `except ...: return ... ok=True`（吞掉验证失败放行成完成）或删掉 `if not result.ok: return result`（无视失败直接 ok=True），现有原则全看不到——那条「谎报完成」回归会零证据拿满分（CWE-345 数据真实性未验证）。必须钉住。"
 
 [[principles]]
@@ -140,6 +159,7 @@ constraint = "GoalLoopRunner 对 maker/checker 的调用必须包在 try/except 
 anchor = "src/goal_loop/loop_runner.py"
 pattern = "class GoalLoopRunner|except Exception"
 violations = "except[^\\n]*(ok=True|Verdict\\.PASS)|except[^\\n]*:\\n\\s*return[^\\n]*(ok=True|Verdict\\.PASS)"
+require = ['except Exception as exc:[^\n]*\n(?:[^\n]*\n){0,3}\s*ok=False', 'except Exception:[^\n]*\n\s*checker_output = CheckerOutput\(verdict=Verdict\.FAIL']  # maker/checker 崩溃都须 fail-closed
 rationale = "崩溃包络：SEC-01..SEC-12 钉的是写隔离/注入/执行/评估/授权/预算/verify-the-world，没一条锚 loop_runner 的崩溃处理。loop_runner.py 是真实的 fail-closed 崩溃包络——maker 抛异常被吞成 ok=False（maker_crashed→no-progress），checker 抛异常被吞成 Verdict.FAIL，任何崩溃都绝不跨过完成判断。若 agent 把调用包进 `except ...: return ... ok=True`（吞掉 maker 崩溃并申报进展，fail-open）或 `except ...: return ... Verdict.PASS`（吞掉 checker 崩溃并宣布通过），现有原则全看不到——那条「崩溃被吞成成功」回归（CWE-703 异常条件处理不当）会零证据拿满分。必须钉住。"
 
 [[principles]]
@@ -151,4 +171,5 @@ constraint = "TasteGate 的否决必须真的否，且红线谓词本身必须�
 anchor = "src/taste_score/gate.py"
 pattern = "run\\(name, p\\)\\.reckless"
 violations = "rejected=False|if not[^\\n]*\\.reckless|if[^\\n]*\\.reckless:[^\\n]*\\n\\s*(pass|continue)\\b"
+require = ['rejected=True,\n\s*reason=f"expanded but regressed safety boundary', 'rejected=True,\n\s*reason="constitution integrity violation']  # 否决须真的置 rejection bit（不只看谓词在场）
 rationale = "引擎自己的否决门此前没有一条原则登记：SEC-01..SEC-13 分别锚 sandbox/safety/observability/security/goal_loop/tool_registry/cost_control/eval_harness，没一条锚 taste_score。而 taste 标准的红线（坏 = E 上 & S 降）唯一被机器执行的地方就是 TasteGate._score_one——帕累托否决、回归否决、以及 score() 顶部的尺子投毒否决，三种否决都落成 rejected=True。若把它翻成 rejected=False（fail-open 放行越界行），或反转成 `if not ...reckless`（只否诚实者、放行越界者），csdd 与 traceability matrix 仍报满格安全边界、零证据拿分——「越界不行」这条边界等于没写。必须钉住。"

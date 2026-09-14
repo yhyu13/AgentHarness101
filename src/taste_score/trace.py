@@ -1157,14 +1157,26 @@ class TraceabilityVerifier:
         return self._run(p)
 
     @staticmethod
-    def classify(pattern: str, violations: str, text: str, probe_id: str) -> ProbeRun:
+    def classify(
+        pattern: str,
+        violations: str,
+        text: str,
+        probe_id: str,
+        require: tuple[str, ...] = (),
+    ) -> ProbeRun:
         """Pure classification over arbitrary anchor text (mutation-score core).
 
         ``did_expand`` = the pattern is present AND the module is not just a placeholder
         shell (a dead ``class X: pass`` / comment-only / docstring-only module). ``safe`` =
-        no violations sentinel is present. Hardened beyond a bare regex: it no longer
-        blesses a guard symbol that carries no logic, which is the naive gap the
-        mutation-score is designed to expose.
+        no violations sentinel is present AND every ``require`` property is present.
+        Hardened beyond a bare regex in both directions: it no longer blesses a guard symbol
+        that carries no logic (the naive gap the mutation-score exposes), and it no longer
+        blesses an anchor whose fail-closed outcome was DELETED — a sentinel can only catch
+        a forbidden shape the cheater ADDS, so a tamper that keeps the symbol and drops the
+        deny branch (``rejected=True`` deleted from the veto return, say) would otherwise
+        score ``safe=True`` forever. ``require`` is where the boundary's positive evidence
+        lives; its default of ``()`` requires nothing, so pre-``require`` rulers keep their
+        exact semantics and no detection can be lost by adding a requirement.
         """
         expanded = bool(re.search(pattern, text))
         if expanded:
@@ -1174,7 +1186,7 @@ class TraceabilityVerifier:
             # through a NAME ``return ALWAYS``, or through a top-level HELPER CALL
             # ``return _always()``); refuse to bless that too.
             expanded = not _is_dead_stub(text) and not _is_inert_module(text)
-        safe = not re.search(violations, text)
+        safe = not re.search(violations, text) and all(re.search(req, text) for req in require)
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
 
     def _run(self, p: Principle) -> ProbeRun:
@@ -1183,7 +1195,9 @@ class TraceabilityVerifier:
         anchor = Path(p.anchor)
         if not anchor.exists():
             return ProbeRun(p.id, did_expand=False, safe=False)
-        return self.classify(p.pattern, p.violations, anchor.read_text(encoding="utf-8"), p.id)
+        return self.classify(
+            p.pattern, p.violations, anchor.read_text(encoding="utf-8"), p.id, p.require
+        )
 
     def compliance(self) -> float:
         """The single-agent cumulative CSDD score.
@@ -1202,11 +1216,12 @@ class TraceabilityVerifier:
     def matrix(self) -> list[dict]:
         """The compliance traceability matrix (paper L7).
 
-        One row per principle: the anchor file, the expected pattern, the level, the
-        boundary it guards, and the *evidence-derived* verdict — ``expanded`` is True iff
-        the anchor file really contains the pattern, and ``safe`` is True iff the anchor
-        is free of the violations sentinel. This is what makes the constitution layer
-        visible in the score instead of a black-box aggregate.
+        One row per principle: the anchor file, the expected pattern, the required positive
+        properties, the level, the boundary it guards, and the *evidence-derived* verdict —
+        ``expanded`` is True iff the anchor file really contains the pattern, and ``safe`` is
+        True iff the anchor is free of the violations sentinel AND still contains every
+        ``require`` property. This is what makes the constitution layer visible in the score
+        instead of a black-box aggregate.
         """
         return [
             {
@@ -1216,6 +1231,7 @@ class TraceabilityVerifier:
                 "cwe": p.cwe,
                 "anchor": p.anchor,
                 "pattern": p.pattern,
+                "require": list(p.require),
                 "expanded": self._run(p).did_expand,
                 "safe": self._run(p).safe,
             }

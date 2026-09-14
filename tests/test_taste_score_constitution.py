@@ -530,13 +530,22 @@ def test_ruler_revision_never_loses_a_detection_against_git_head() -> None:
         pytest.skip("no git HEAD constitution to compare against")
     new = load_constitution(DEFAULT_CONSTITUTION)
     old_by_id = {p.id: p for p in head.principles}
+
+    def detects(princ: Principle, form: str) -> bool:
+        # A form is caught when it trips a `violations` sentinel OR drops a property the
+        # principle requires to be PRESENT (`require`). Both directions count as a detection,
+        # so a revision that trades a sentinel for a requirement has to keep the teeth.
+        return bool(re.search(princ.violations, form)) or any(
+            not re.search(req, form) for req in princ.require
+        )
+
     lost: list[str] = []
     for p in new.principles:
         old = old_by_id.get(p.id)
         if old is None:
             continue
         for form in FAIL_OPEN_FORMS.get(p.id, ()):
-            if re.search(old.violations, form) and not re.search(p.violations, form):
+            if detects(old, form) and not detects(p, form):
                 lost.append(p.id)
     assert not lost, f"ruler revision lost a detection the committed ruler had: {sorted(set(lost))}"
 
@@ -605,3 +614,128 @@ def test_verifier_calls_a_flipped_veto_unsafe(tmp_path: Path) -> None:
     ).matrix()
     assert rows[0]["expanded"] is True
     assert rows[0]["safe"] is False, "the ruler blessed a fail-open veto (rejected=False)"
+
+
+def test_deleting_the_veto_bit_is_caught_even_though_the_predicate_survives(
+    tmp_path: Path,
+) -> None:
+    """A DELETE-only tamper: keep the veto predicate, drop its ``rejected=True`` bit.
+
+    The previous round named this as the open gap. SEC-14's sentinel names three shapes of
+    tampering and every one of them is a statement the cheater ADDS; `pattern` only checks
+    that the predicate is still there. So the cheapest tamper of all — deleting the
+    rejection bit from the veto return — slipped through both detectors: `rejected` defaults
+    to False on ``TasteScore``, the veto silently returns an un-rejected score, and the
+    ruler still reported ``safe=True``. Absence-detection cannot see a deletion; only a
+    must-be-present requirement can.
+    """
+    from dataclasses import replace
+
+    from taste_score.constitution import Constitution as C
+    from taste_score.trace import TraceabilityVerifier
+
+    shipped = load_constitution(DEFAULT_CONSTITUTION)
+    princ = next(p for p in shipped.principles if p.id == "SEC-14")
+    real = (ROOT / princ.anchor).read_text(encoding="utf-8")
+
+    gutted_text = real.replace(
+        "agent=name, golden_score=golden_score, rejected=True,\n"
+        '                    reason=f"expanded but regressed safety boundary (probe {p.probe_id})",',
+        "agent=name, golden_score=golden_score,\n"
+        '                    reason=f"expanded but regressed safety boundary (probe {p.probe_id})",',
+    )
+    assert gutted_text != real, "the sabotage target text moved — update the deletion"
+    # Pin WHY the old detectors are blind to it, rather than asserting it in prose: the
+    # predicate survives (so `pattern` matches) and no forbidden shape was added (so the
+    # `violations` sentinel stays silent).
+    assert re.search(princ.pattern, gutted_text), "the veto predicate must survive the deletion"
+    assert not re.search(princ.violations, gutted_text), "a deletion adds no sentinel shape"
+
+    gutted = tmp_path / "gate_gutted.py"
+    gutted.write_text(gutted_text, encoding="utf-8")
+    rows = TraceabilityVerifier(
+        C(version=shipped.version, principles=(replace(princ, anchor=str(gutted)),))
+    ).matrix()
+    assert rows[0]["expanded"] is True
+    assert rows[0]["safe"] is False, "the ruler blessed a veto that never sets its rejection bit"
+
+
+def test_every_principle_declares_a_positive_require() -> None:
+    # `safe` used to be pure ABSENCE-detection. A tamper that only DELETES a guard leaves
+    # nothing to detect, so each principle now names the fail-closed OUTCOME it must keep
+    # (`require`). Coverage ratchet: a new principle must not dodge this by shipping none.
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    missing = [p.id for p in c.principles if not p.require]
+    assert not missing, f"principle(s) without a positive `require`: {missing}"
+
+
+def test_every_require_matches_its_anchor_and_is_not_a_wildcard() -> None:
+    # Same authoring rule as `pattern`: no invented security properties. Every `require`
+    # must be true of the REAL anchor file, and must not match the empty string — a
+    # wildcard like `.*` would "pass" everywhere and measure nothing.
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    for p in c.principles:
+        text = (ROOT / p.anchor).read_text(encoding="utf-8")
+        for req in p.require:
+            assert re.search(req, text), f"{p.id} require not found in {p.anchor}: {req}"
+            assert not re.search(req, ""), (
+                f"{p.id} require matches the empty string — that is a wildcard, not a "
+                f"property: {req}"
+            )
+
+
+def test_every_require_detects_its_property_being_gutted(tmp_path: Path) -> None:
+    # Teeth, mechanically measured instead of asserted in prose: delete the required property
+    # from a copy of the real anchor and the ruler must call it UNSAFE. A `require` that
+    # survives its own deletion is decoration.
+    from dataclasses import replace
+
+    from taste_score.constitution import Constitution as C
+    from taste_score.trace import TraceabilityVerifier
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    for p in c.principles:
+        text = (ROOT / p.anchor).read_text(encoding="utf-8")
+        for i, req in enumerate(p.require):
+            gutted = text
+            for m in reversed([m for m in re.finditer(req, text) if m.group(0)]):
+                gutted = gutted[: m.start()] + "\n" + gutted[m.end() :]
+            assert gutted != text, f"{p.id}: require matched nothing removable: {req}"
+            target = tmp_path / f"{p.id}_{i}.py"
+            target.write_text(gutted, encoding="utf-8")
+            rows = TraceabilityVerifier(
+                C(version=c.version, principles=(replace(p, anchor=str(target)),))
+            ).matrix()
+            assert rows[0]["safe"] is False, (
+                f"{p.id}: the ruler still calls the anchor safe after its required property "
+                f"was deleted: {req}"
+            )
+
+
+def test_a_non_list_require_is_rejected() -> None:
+    # Fail-closed parsing. `require` is a LIST of regexes; a bare string would be iterated
+    # character by character (every single character a "requirement"), silently turning the
+    # positive-property check into a no-op. Refuse it loudly instead of degrading.
+    import pytest
+
+    from taste_score.constitution import _from_payload
+
+    payload = {
+        "version": "1.0.0",
+        "principles": [
+            {
+                "id": "SEC-XX",
+                "boundary": "b",
+                "cwe": "CWE-1",
+                "level": "MUST",
+                "constraint": "c",
+                "anchor": "a",
+                "pattern": "p",
+                "violations": "v",
+                "rationale": "r",
+                "require": "not-a-list",
+            }
+        ],
+    }
+    with pytest.raises(ValueError):
+        _from_payload(payload)
