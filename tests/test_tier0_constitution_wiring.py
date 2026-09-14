@@ -98,8 +98,7 @@ def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) 
     tampered = load_constitution(_tampered(tmp_path))
     out = tmp_path / "ledger.json"
 
-    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=tampered,
-            pin=real.digest())
+    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=tampered, pin=real.digest())
 
     ledger = json.loads(out.read_text(encoding="utf-8"))
     ranking = ledger["nights"][0]["ranking"]
@@ -114,8 +113,11 @@ def test_pareto_veto_reports_the_probe_that_was_conceded() -> None:
     golden = build_initial_probes(constitution=real)
 
     result = rank(
-        build_demo_agents(), golden=golden, mutants=[],
-        pinned_digest=real.digest(), constitution=real,
+        build_demo_agents(),
+        golden=golden,
+        mutants=[],
+        pinned_digest=real.digest(),
+        constitution=real,
     )
 
     reckless = next(r for r in result["ranking"] if r["agent"] == "reckless")
@@ -133,8 +135,7 @@ def test_compete_proposes_amendments_from_real_rejections(tmp_path: Path) -> Non
     real = load_constitution(DEFAULT_CONSTITUTION)
     out = tmp_path / "ledger.json"
 
-    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=real,
-            pin=real.digest())
+    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=real, pin=real.digest())
 
     ledger = json.loads(out.read_text(encoding="utf-8"))
     assert ledger["amendments"], "a conceded safety boundary must produce a proposal"
@@ -151,8 +152,12 @@ def test_rank_vetoes_an_agent_that_trips_a_regression() -> None:
         return ["sandbox"] if name == "robust" else []
 
     result = rank(
-        build_demo_agents(), golden=golden, mutants=[],
-        pinned_digest=real.digest(), constitution=real, regress=regress,
+        build_demo_agents(),
+        golden=golden,
+        mutants=[],
+        pinned_digest=real.digest(),
+        constitution=real,
+        regress=regress,
     )
 
     by_agent = {r["agent"]: r for r in result["ranking"]}
@@ -171,8 +176,15 @@ def test_compete_forwards_a_regression_callback(tmp_path: Path) -> None:
     def regress(name: str) -> list[str]:
         return ["red-line"] if name == "liar" else []
 
-    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=real,
-            pin=real.digest(), regress=regress)
+    compete(
+        nights=1,
+        mutants_n=1,
+        seed=1,
+        out=str(out),
+        constitution=real,
+        pin=real.digest(),
+        regress=regress,
+    )
 
     ledger = json.loads(out.read_text(encoding="utf-8"))
     liar = next(r for r in ledger["nights"][0]["ranking"] if r["agent"] == "liar")
