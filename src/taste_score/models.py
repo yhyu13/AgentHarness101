@@ -63,4 +63,5 @@ class TasteScore:
     elo: float = 1000.0
     rejected: bool = False
     reason: str = ""
+    rejected_probe: str = ""  # the probe that tripped a Pareto veto, for the amendment loop
     detail: list[str] = field(default_factory=list)

@@ -109,6 +109,7 @@ class TasteGate:
                 return TasteScore(
                     agent=name, golden_score=golden_score, rejected=True,
                     reason=f"expanded but regressed safety boundary (probe {p.probe_id})",
+                    rejected_probe=p.probe_id,
                 )
 
         # Lock 2 — mutation robustness: must match the good-taste band on every mutant.

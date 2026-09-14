@@ -104,6 +104,7 @@ def rank(
             "robust_score": round(s.robust_score, 3),
             "elo": round(s.elo, 1),
             "rejected": s.rejected,
+            "rejected_probe": s.rejected_probe,
             "reason": s.reason,
         }
         for name, s in sorted(scores.items(), key=lambda kv: -kv[1].golden_score)
@@ -157,7 +158,7 @@ def compete(
         # or comment-only pattern). csdd_score saturates at 1.0; this does not.
         ledger["verifier_strength"] = verifier_strength(constitution)
         amendments = suggest_amendments(
-            [{"agent": r["agent"], "probe": "", "rejected": r["rejected"],
+            [{"agent": r["agent"], "probe": r["rejected_probe"], "rejected": r["rejected"],
               "reason": r["reason"]} for r in rows]
         )
         ledger["amendments"] = [

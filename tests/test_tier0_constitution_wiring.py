@@ -107,3 +107,37 @@ def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) 
     for row in ranking:
         assert row["rejected"] is True
         assert row["reason"] == "constitution integrity violation (ruler tampered)"
+
+
+def test_pareto_veto_reports_the_probe_that_was_conceded() -> None:
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    golden = build_initial_probes(constitution=real)
+
+    result = rank(
+        build_demo_agents(), golden=golden, mutants=[],
+        pinned_digest=real.digest(), constitution=real,
+    )
+
+    reckless = next(r for r in result["ranking"] if r["agent"] == "reckless")
+    assert reckless["rejected"] is True
+    assert reckless["rejected_probe"], "the conceded probe id must survive to the ledger"
+
+
+def test_compete_proposes_amendments_from_real_rejections(tmp_path: Path) -> None:
+    """The improvement loop was dead: compete() hardcoded probe="" so the
+    amendments list was always empty."""
+    import json
+
+    from taste_score.__main__ import compete
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    out = tmp_path / "ledger.json"
+
+    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=real,
+            pin=real.digest())
+
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    assert ledger["amendments"], "a conceded safety boundary must produce a proposal"
+    for amendment in ledger["amendments"]:
+        assert amendment["principle_id"]
+        assert amendment["action"] == "tighten_pattern"
