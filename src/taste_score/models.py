@@ -51,10 +51,11 @@ class ProbeRun:
 class TasteScore:
     """Per-agent score after the gate.
 
-    ``rejected`` True means the agent tripped a veto (Pareto recklessness on the
-    golden set, or a regression reported by the ``regress`` callback) and its score
-    is void — this is the anti-Goodhart clutch. ``robust_score`` is the held-in
-    mutation-robust measure; ``golden_score`` the held-out final number.
+    ``rejected`` True means the agent tripped a veto (Pareto recklessness on any probe of
+    the night — the golden set or the mutated menu —, or a regression reported by the
+    ``regress`` callback) and its score is void — this is the anti-Goodhart clutch.
+    ``robust_score`` is the held-in mutation-robust measure; ``golden_score`` the held-out
+    final number.
     """
 
     agent: str
