@@ -12,7 +12,7 @@ import re
 
 from taste_score.constitution import DEFAULT_CONSTITUTION, Constitution, load_constitution
 from taste_score.mutation_score import mutant_cases, verifier_strength
-from taste_score.trace import TraceabilityVerifier, _is_dead_stub
+from taste_score.trace import TraceabilityVerifier, _is_dead_stub, _is_inert_module
 
 
 def _constitution() -> Constitution:
@@ -1180,3 +1180,138 @@ def test_factory_clsattr_delegation_that_decides_is_still_blessed() -> None:
         "a factory-returned classmethod whose built guard genuinely decides on state must stay a real guard"
     )
     assert run.safe is True
+
+
+def test_classify_rejects_a_guard_that_survives_only_in_a_comment() -> None:
+    """The realistic DELETE tamper, one step past the whole-file shell.
+
+    The ``comment`` fake above is a module of prose ONLY (a shell, caught by the dead-stub rule).
+    The cheaper tamper is this: a real module that keeps its other logic and mentions the guard it
+    just deleted in a comment. A regex over raw text counts that mention as the guard, so the ruler
+    credits an expansion that no longer exists in code. Evidence must be code-backed.
+    """
+    p = _constitution().principles[0]  # SEC-01 'allows_write|_is_within|allow_roots'
+    tampered = (
+        '"""Path policy."""\n'
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def helper(target: str) -> str:\n"
+        "    # allows_write used to check _is_within(resolved, root) before writing\n"
+        "    return str(Path(target).resolve())\n"
+    )
+    assert re.search(p.pattern, tampered), "the raw regex still sees the name, in the comment"
+    assert not _is_dead_stub(tampered), "the module is not a shell — it keeps real logic"
+    assert not _is_inert_module(tampered), "nor is it an inert pass-through"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, tampered, p.id)
+    assert run.did_expand is False, "a comment mentioning a guard is not the guard"
+
+
+def test_classify_rejects_a_guard_that_survives_only_in_a_docstring() -> None:
+    """Same family, prose container #2: the guard's name lives on only in a docstring."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    tampered = (
+        "def enforce(action, risk):\n"
+        '    """SafetyGuard used to consult _HIGH_RISK_ACTIONS here."""\n'
+        "    return risk == 'low' and action == 'read'\n"
+    )
+    assert re.search(p.pattern, tampered), "the raw regex still sees the name, in the docstring"
+    assert not _is_dead_stub(tampered) and not _is_inert_module(tampered)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, tampered, p.id)
+    assert run.did_expand is False, "a docstring mentioning a guard is not the guard"
+
+
+def test_classify_rejects_a_require_that_survives_only_in_prose() -> None:
+    """The same hole on the POSITIVE side. Deleting the fail-closed line and leaving its text in a
+    comment keeps every ``require`` matching, so the ruler goes on reporting ``safe=True`` on an
+    anchor whose required property is gone from the code.
+    """
+    princ = next(p for p in _constitution().principles if p.id == "SEC-01")
+    real = Path(princ.anchor).read_text(encoding="utf-8")
+    target = "        return any(self._is_within(resolved, root) for root in self.allow_roots)\n"
+    assert target in real, "the sabotage target moved — update the deletion"
+    gutted = real.replace(target, "        # " + target.strip() + "\n")
+    assert re.search(princ.require[0], gutted), "the leftover prose still satisfies the requirement"
+    run = TraceabilityVerifier.classify(
+        princ.pattern, princ.violations, gutted, princ.id, princ.require
+    )
+    assert run.safe is False, "a comment carrying the required property is not the property"
+
+
+def test_classify_still_counts_code_backed_evidence_next_to_prose() -> None:
+    """Blanking prose must not blank code. A guard whose required property really is in the code
+    still reads safe when the same file ALSO names it in a docstring and a comment.
+    """
+    p = _constitution().principles[0]  # SEC-01
+    text = (
+        '"""Path policy.\n'
+        "\n"
+        "Docstring naming allows_write / _is_within(resolved, root) / allow_roots.\n"
+        '"""\n'
+        "import os\n"
+        "\n"
+        "\n"
+        "def allows_write(target, roots):\n"
+        '    """Allows a write only when _is_within(resolved, root) holds."""\n'
+        "    resolved = os.path.abspath(target)\n"
+        "    # the containment check is the guard\n"
+        "    return any(_is_within(resolved, root) for root in roots)\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, text, p.id, p.require)
+    assert run.did_expand is True
+    assert run.safe is True, "code-backed evidence must survive the prose blanking"
+
+
+def test_classify_still_honours_a_require_that_contains_a_string_literal() -> None:
+    """Only PROSE is blanked — never a string that is part of a statement.
+
+    SEC-02's real ``require`` carries a string literal (``risk == "high"``), as does SEC-14's
+    (``reason="constitution integrity violation …"``). A rule that blanked every string literal
+    would silently gut both principles, so an ordinary string stays code — while the very same
+    property written as a comment must stop counting.
+    """
+    p = _constitution().principles[1]  # SEC-02
+    text = (
+        "def decide(risk, action):\n"
+        '    if risk == "high" or action in _HIGH_RISK_ACTIONS:\n'
+        "        return PENDING\n"
+        "    return APPROVED\n"
+    )
+    run = TraceabilityVerifier.classify(
+        "def decide|_HIGH_RISK_ACTIONS", p.violations, text, p.id, p.require
+    )
+    assert run.safe is True, "a string literal inside a statement is code, not prose"
+    commented = "# " + text.replace("\n", "\n# ")
+    assert re.search(p.require[0], commented), "the raw text would satisfy it — that is the trap"
+    run2 = TraceabilityVerifier.classify(
+        "def decide|_HIGH_RISK_ACTIONS", p.violations, commented, p.id, p.require
+    )
+    assert run2.safe is False, "the required property survives only as a comment"
+
+
+def test_prose_only_fakes_model_the_cheater_that_deletes_the_guard() -> None:
+    """The corpus must carry the prose family, and pin WHY each fake is rejected.
+
+    For the two rejected flavours the raw regex still matches the guard's name and the module is
+    neither a shell nor an inert pass-through — so the only thing that can reject them is the
+    code-only evidence rule (not the dead-stub rule, not the inert rule: rejecting for the wrong
+    reason would deflate the measure instead of measuring it). The string-literal flavour is the
+    named, still-blessed residual of that rule — a string is part of a statement, not prose.
+    """
+    p = _constitution().principles[0]  # SEC-01
+    cases = {c.label: c for c in mutant_cases(p)}
+    for label in ("prose-comment", "prose-docstring"):
+        case = cases[label]
+        ast.parse(case.text)
+        assert case.expected_genuine is False
+        assert re.search(p.pattern, case.text), f"{label}: the raw regex must still see the name"
+        assert not _is_dead_stub(case.text), f"{label}: not a shell"
+        assert not _is_inert_module(case.text), f"{label}: not an inert pass-through"
+        run = TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
+        assert run.did_expand is False, f"{label}: prose is not code"
+    residual = cases["string-hidden"]
+    ast.parse(residual.text)
+    assert re.search(p.pattern, residual.text)
+    assert not _is_dead_stub(residual.text) and not _is_inert_module(residual.text)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, residual.text, p.id)
+    assert run.did_expand is True, "the string-literal flavour stays the honest residual"

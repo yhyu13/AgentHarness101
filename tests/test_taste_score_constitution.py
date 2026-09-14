@@ -739,3 +739,22 @@ def test_a_non_list_require_is_rejected() -> None:
     }
     with pytest.raises(ValueError):
         _from_payload(payload)
+
+
+def test_every_principle_evidence_is_code_backed_not_prose() -> None:
+    """Authoring ratchet for the code-anchored evidence rule (``trace._code_only``).
+
+    A principle's ``pattern`` and EVERY ``require`` must be satisfied by the CODE view of its real
+    anchor — the same text with comments and docstrings blanked. Otherwise a tamper that deletes
+    the guard and leaves its text behind as prose keeps the ruler reporting ``did_expand``/``safe``
+    for a boundary that is no longer in the code. A future principle whose evidence lives only in
+    prose fails here instead of quietly riding at csdd = 1.0.
+    """
+    from taste_score.trace import _code_only
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    for p in c.principles:
+        code = _code_only((ROOT / p.anchor).read_text(encoding="utf-8"))
+        assert re.search(p.pattern, code), f"{p.id} pattern is satisfied by prose only"
+        for req in p.require:
+            assert re.search(req, code), f"{p.id} require is satisfied by prose only: {req}"

@@ -9,7 +9,9 @@ present and a ``violations`` sentinel that must be absent). Deterministic, no LL
 from __future__ import annotations
 
 import ast
+import io
 import re
+import tokenize
 from pathlib import Path
 
 from taste_score.constitution import Constitution, Principle
@@ -66,6 +68,56 @@ def _is_dead_stub(text: str) -> bool:
     if not tree.body:
         return True  # empty / comment-only module -> no guard implemented
     return all(_stmt_is_placeholder(s) for s in tree.body)
+
+
+def _docstring_spans(text: str) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """The ``(row, col)`` spans of every docstring in ``text`` (module/class/def alike)."""
+    spans: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    for node in ast.walk(ast.parse(text)):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            value = first.value
+            spans.append(
+                ((value.lineno, value.col_offset), (value.end_lineno, value.end_col_offset))
+            )
+    return spans
+
+
+def _code_only(text: str) -> str:
+    """``text`` with its PROSE blanked — comments and docstrings removed, line structure kept.
+
+    Evidence (``pattern`` / ``require``) used to be matched against raw text, so a tamper that
+    DELETED the guard and left its text behind in a comment or a docstring still satisfied it:
+    the ruler credited a boundary that is no longer in the code. Evidence has to be code.
+    Ordinary string literals are deliberately KEPT — a real ``require`` may contain one (SEC-02's
+    ``risk == "high"``), so blanking every string would gut the real constitution instead of
+    hardening it. Unparseable text falls back to itself, like ``_is_dead_stub``: a parser hiccup
+    must never reject a real source file.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+        spans = [(tok.start, tok.end) for tok in tokens if tok.type == tokenize.COMMENT]
+        spans += _docstring_spans(text)
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return text
+    lines = text.splitlines(keepends=True)
+    for (start_row, start_col), (end_row, end_col) in spans:
+        for row in range(start_row, end_row + 1):
+            line = lines[row - 1]
+            body = line.rstrip("\r\n")  # the terminator is not part of the span
+            begin = start_col if row == start_row else 0
+            finish = end_col if row == end_row else len(body)
+            lines[row - 1] = (
+                body[:begin] + " " * max(0, finish - begin) + body[finish:] + line[len(body) :]
+            )
+    return "".join(lines)
 
 
 def _find_method(
@@ -1177,8 +1229,17 @@ class TraceabilityVerifier:
         score ``safe=True`` forever. ``require`` is where the boundary's positive evidence
         lives; its default of ``()`` requires nothing, so pre-``require`` rulers keep their
         exact semantics and no detection can be lost by adding a requirement.
+
+        Both directions are read off the CODE view of the text (``_code_only`` blanks comments
+        and docstrings, keeping line structure and ordinary string literals). Matching raw text
+        let a tamper satisfy the evidence with PROSE: delete the guard, leave its name in a
+        comment or a docstring, and the ruler still credited the expansion and called it safe.
+        ``violations`` stays on the raw text on purpose — that check is about ABSENCE, and a
+        forbidden shape mentioned anywhere is still a signal, so blanking prose there could only
+        lose a detection.
         """
-        expanded = bool(re.search(pattern, text))
+        code = _code_only(text)
+        expanded = bool(re.search(pattern, code))
         if expanded:
             # A symbol can be present yet be a shell; refuse to bless a placeholder guard.
             # A symbol can ALSO be present with real code yet decide nothing (an inert
@@ -1186,7 +1247,7 @@ class TraceabilityVerifier:
             # through a NAME ``return ALWAYS``, or through a top-level HELPER CALL
             # ``return _always()``); refuse to bless that too.
             expanded = not _is_dead_stub(text) and not _is_inert_module(text)
-        safe = not re.search(violations, text) and all(re.search(req, text) for req in require)
+        safe = not re.search(violations, text) and all(re.search(req, code) for req in require)
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
 
     def _run(self, p: Principle) -> ProbeRun:

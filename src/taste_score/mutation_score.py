@@ -53,6 +53,16 @@ does ``return cls.build()``) — the resolver follows ONE attribute call on the 
 them, so the base builder that binds the constant is never reached and the read is not proven a constant. Each
 ratchet step is: catch this level, add a subtler one.
 
+This fire adds a second, orthogonal axis to the corpus: WHERE the guard's name survives, not how the
+constant it returns is hidden. ``prose-comment`` / ``prose-docstring`` are the cheater who DELETES the
+guard and leaves its name behind in a comment or a docstring: the module keeps real logic (so the
+dead-stub rule does not fire) and a regex over raw text still matches — which is exactly how the
+raw-text ruler credited an expansion that was not in the code. Both are now CAUGHT, because evidence
+is read from the code-only view (``trace._code_only`` blanks comments and docstrings). The residual
+moves to ``string-hidden``: the name inside an ORDINARY string literal, which the code view keeps on
+purpose (a real ``require`` may contain one, e.g. SEC-02's ``risk == "high"``), so it is honestly
+still blessed.
+
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
 and the score is deflated for the wrong reason. Every fake models something a cheater could
@@ -936,6 +946,44 @@ def _nested_clsattr_delegation_hidden(token: str) -> str:
     )
 
 
+def _prose_comment_hidden(token: str) -> str:
+    """The guard DELETED from the code and left behind as a COMMENT.
+
+    Not the same fake as ``comment`` above (a module of prose only, which the dead-stub rule
+    catches): here the module keeps real logic, so nothing about the shape is a shell and a regex
+    over raw text still finds the guard's name in the comment — the ruler credited an expansion
+    that is not in the code. Now CAUGHT: evidence is read from the code-only view, so a name that
+    survives only as prose is not an implementation.
+    """
+    literal = token.replace("\\", "")
+    return f"def _guard(p):\n    # {literal}\n    return p in _allowed_roots\n"
+
+
+def _prose_docstring_hidden(token: str) -> str:
+    """Same cheater, prose container #2: the name lives on only in a DOCSTRING.
+
+    The module has a real function body (so not a shell, not an inert pass-through) and the raw
+    regex still matches inside the docstring; the code view blanks it, so the fake is rejected for
+    the right reason. Now CAUGHT, as above.
+    """
+    literal = token.replace("\\", "").replace('"', "").replace("'", "")
+    return (
+        f'def _guard(p):\n    """{literal} is enforced here."""\n    return p in _allowed_roots\n'
+    )
+
+
+def _string_hidden(token: str) -> str:
+    """The residual of the code-only rule: the name survives inside an ORDINARY STRING LITERAL.
+
+    A string is part of a statement, not prose — and the code view deliberately keeps ordinary
+    strings, because real ``require`` properties contain them (SEC-02's ``risk == "high"``). So
+    this guard is still blessed: the honest headroom of the rule, and the 'add a subtler mutant'
+    ratchet once the two prose flavours are caught.
+    """
+    literal = token.replace("\\", "").replace('"', "").replace("'", "")
+    return f'def _guard(p):\n    _note = "{literal}"\n    return p in _allowed_roots\n'
+
+
 def _constant_hidden(token: str) -> str:
     """A guard that returns a value through a *name* (``return ALWAYS``), not a literal — so the
     return LOOKS like it could depend on state but is really a fixed module constant. The
@@ -1073,6 +1121,17 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
             _nested_clsattr_delegation_hidden(tok),
             False,
         ),
+        # The guard deleted from the code, its name left behind as a COMMENT in a module that
+        # still has real logic — the dead-stub rule does not fire and the raw regex still matches,
+        # so only a code-only evidence rule can reject it. Now CAUGHT (`_code_only`).
+        MutantCase("prose-comment", _prose_comment_hidden(tok), False),
+        # Same cheater, name left behind in a DOCSTRING. Now CAUGHT, for the same reason.
+        MutantCase("prose-docstring", _prose_docstring_hidden(tok), False),
+        # The name survives inside an ordinary STRING LITERAL. A string is part of a statement, not
+        # prose, and the code view keeps ordinary strings on purpose (real `require` properties
+        # contain them), so this one is still blessed: the honest residual of the code-only rule,
+        # and the 'add a subtler mutant' ratchet once the prose flavours are caught.
+        MutantCase("string-hidden", _string_hidden(tok), False),
     ]
 
 
