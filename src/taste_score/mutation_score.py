@@ -59,8 +59,13 @@ receiver delegation, and a module-level function whose EVERY return is a method 
 read as TRANSPARENT (whatever it returns is decided by the receiver's method, which is checked as a member of
 the class the receiver was handed to in this same module), so the helper no longer poisons the module's
 inertness. The residual moved one ratchet step deeper again to ``cls-alias-delegation-hidden``: the receiver is
-RENAMED through a local alias before the hand-off (``create`` does ``k = cls`` then ``return _delegate(k)``),
-so the argument no longer names the tracked receiver and the base builder is never reached. Each
+RENAMED through a local alias before the hand-off (``create`` does ``k = cls`` then ``return _delegate(k)``)
+— and this fire that one is CAUGHT too: the delegation look now ranges over every LOCAL NAME that denotes
+the tracked receiver (an alias chain counts; a name that is ever rebound from anything else is
+conservatively NOT tracked), so the argument still names the receiver and the base builder is reached. The
+residual moved one ratchet step deeper again to ``attr-hold-delegation-hidden``: the receiver is PARKED ON
+AN ATTRIBUTE before the hand-off (``create`` does ``cls._recv = cls`` then ``return _delegate(cls._recv)``),
+so the argument is no longer a NAME at all and the alias lookup cannot reach it. Each
 ratchet step is: catch this level, add a subtler one.
 
 This fire adds a second, orthogonal axis to the corpus: WHERE the guard's name survives, not how the
@@ -1047,11 +1052,11 @@ def _cls_alias_delegation_hidden(token: str) -> str:
     """A pass-through whose constant is read on an instance reached through a classmethod factory
     that RENAMES ITS ``cls`` RECEIVER THROUGH A LOCAL ALIAS before handing it to a module-level
     helper (``_make().create().val`` — ``create`` does ``k = cls`` then ``return _delegate(k)``).
-    Once the resolver follows a receiver handed to a helper UNDER ITS OWN NAME, the next honest
-    headroom is a hand-off that no longer NAMES the tracked receiver: an alias is a plain local
-    assignment, not a ``_Cls(...)`` construction, so the parameter is never bound, the base builder
-    is never reached, the read is not proven a constant and the guard stays a real decision. The
-    'add a subtler mutant' ratchet once ``cls-arg-delegation-hidden`` is caught."""
+    Now CAUGHT: the alias lookup ranges over the local NAMES that denote the tracked receiver
+    (``k = cls`` is followed exactly like ``cls``, and a chain of such renames with it), so the
+    helper's parameter is bound and the base builder is reached. The 'add a subtler mutant' ratchet
+    once ``cls-arg-delegation-hidden`` is caught; the residual moved to
+    ``attr-hold-delegation-hidden``."""
     sym = _guard_symbol(token)
     if not sym:
         literal = token.replace("\\", "")
@@ -1108,6 +1113,84 @@ def _cls_alias_delegation_hidden(token: str) -> str:
         "    @classmethod\n"
         "    def create(cls):\n"
         "        k = cls\n        return _delegate(k)\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return _Helper()\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _make().create().val\n"
+    )
+
+
+def _attr_hold_delegation_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a classmethod factory
+    that PARKS ITS ``cls`` RECEIVER ON AN ATTRIBUTE before handing it to a module-level helper
+    (``_make().create().val`` — ``create`` does ``cls._recv = cls`` then ``return _delegate(cls._recv)``).
+    Once the resolver follows a receiver RENAMED through a local alias, the next honest headroom is a
+    receiver that is no longer a local NAME AT ALL at the hand-off: the alias lookup ranges over local
+    NAME aliases only, so a value read back off an attribute is not tracked, the helper's parameter is
+    never bound, the base builder is never reached, the read is not proven a constant and the guard
+    stays a real decision. The 'add a subtler mutant' ratchet once ``cls-alias-delegation-hidden`` is
+    caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        cls._recv = cls\n"
+            "        return _delegate(cls._recv)\n"
+            "def _delegate(k):\n"
+            "    return k.build()\n"
+            "def _make():\n"
+            "    return _Helper()\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _make().create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        cls._recv = cls\n"
+            "        return _delegate(cls._recv)\n"
+            "    def check(self, action):\n"
+            "        return _make().create()._ALWAYS\n"
+            "def _delegate(k):\n"
+            "    return k.build()\n"
+            "def _make():\n"
+            f"    return {sym}()\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        cls._recv = cls\n"
+        "        return _delegate(cls._recv)\n"
         "def _delegate(k):\n"
         "    return k.build()\n"
         "def _make():\n"
@@ -1318,12 +1401,23 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         ),
         # A pass-through whose constant is read on an instance reached through a classmethod factory
         # that RENAMES ITS ``cls`` RECEIVER THROUGH A LOCAL ALIAS before handing it to a module-level
-        # helper (_make().create().val where create does ``k = cls`` then ``return _delegate(k)``) — the
-        # hand-off no longer names the tracked receiver, so the parameter is never bound and the read
-        # stays non-constant: the honest residual headroom once cls-arg-delegation-hidden is caught.
+        # helper (_make().create().val where create does ``k = cls`` then ``return _delegate(k)``) — now
+        # CAUGHT: the delegation look ranges over every local NAME denoting the tracked receiver, so the
+        # helper's parameter is bound and the chain reaches the base builder that binds the constant.
         MutantCase(
             "cls-alias-delegation-hidden",
             _cls_alias_delegation_hidden(tok),
+            False,
+        ),
+        # A pass-through whose constant is read on an instance reached through a classmethod factory
+        # that PARKS ITS ``cls`` RECEIVER ON AN ATTRIBUTE before the hand-off (_make().create().val where
+        # create does ``cls._recv = cls`` then ``return _delegate(cls._recv)``) — the alias lookup only
+        # follows local NAMES, so a value read back off an attribute is not tracked, the parameter is
+        # never bound and the read stays non-constant: the honest residual headroom once
+        # cls-alias-delegation-hidden is caught.
+        MutantCase(
+            "attr-hold-delegation-hidden",
+            _attr_hold_delegation_hidden(tok),
             False,
         ),
         # The guard deleted from the code, its name left behind as a COMMENT in a module that

@@ -297,6 +297,294 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-01T15:08:08.586Z"
+    },
+    {
+      "id": "bug-019",
+      "timestamp": "2026-09-02T02:44:47.035Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_taste_score.py",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 6→7 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T02:44:47.035Z"
+    },
+    {
+      "id": "bug-020",
+      "timestamp": "2026-09-02T08:49:09.257Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 15→29 lines (2 removed) | Also: result = rank(build_demo_agents(), golden=golden, ; dest.write_text(json.dumps({\"nights\": score_accum}",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-09-02T08:49:20.868Z"
+    },
+    {
+      "id": "bug-021",
+      "timestamp": "2026-09-02T09:58:04.120Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/taste_score/source.py",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 7→13 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T09:58:04.120Z"
+    },
+    {
+      "id": "bug-022",
+      "timestamp": "2026-09-02T15:48:06.866Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/taste_score/trace.py",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 6→8 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T15:48:06.866Z"
+    },
+    {
+      "id": "bug-023",
+      "timestamp": "2026-09-02T15:48:21.475Z",
+      "error_message": "Wrong return value",
+      "file": "src/taste_score/gate.py",
+      "root_cause": "Was returning: verify(name, probe)",
+      "fix": "Now returns: evidence",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T15:48:21.475Z"
+    },
+    {
+      "id": "bug-024",
+      "timestamp": "2026-09-02T15:48:40.214Z",
+      "error_message": "Wrong return value",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "Was returning: TraceabilityVerifier(constitution)",
+      "fix": "Now returns: evidence",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T15:48:40.214Z"
+    },
+    {
+      "id": "bug-025",
+      "timestamp": "2026-09-02T15:49:10.342Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "9 lines replaced/restructured",
+      "fix": "Rewrote 21→29 lines (9 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-02T15:49:10.342Z"
+    },
+    {
+      "id": "bug-026",
+      "timestamp": "2026-09-14T04:50:23.433Z",
+      "error_message": "Wrong reference: int should be pin",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "Used \"int\" instead of \"pin\"",
+      "fix": "Changed int → pin",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T04:50:23.433Z"
+    },
+    {
+      "id": "bug-027",
+      "timestamp": "2026-09-14T04:57:39.115Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "Had \"reason\"",
+      "fix": "Changed to \"rejected_probe\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-09-14T04:57:41.167Z"
+    },
+    {
+      "id": "bug-028",
+      "timestamp": "2026-09-14T05:13:27.554Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/goal_persistence/store.py",
+      "root_cause": "6 lines replaced/restructured",
+      "fix": "Rewrote 41→57 lines (6 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T05:13:27.554Z"
+    },
+    {
+      "id": "bug-029",
+      "timestamp": "2026-09-14T05:19:28.173Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_persistence_resilience.py",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 3→4 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T05:19:28.173Z"
+    },
+    {
+      "id": "bug-030",
+      "timestamp": "2026-09-14T05:43:27.018Z",
+      "error_message": "Wrong reference: dataclass should be asdict",
+      "file": "src/context_compaction/models.py",
+      "root_cause": "Used \"dataclass\" instead of \"asdict\"",
+      "fix": "Changed dataclass → asdict",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T05:43:27.018Z"
+    },
+    {
+      "id": "bug-031",
+      "timestamp": "2026-09-14T06:07:03.619Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/taste_score/__main__.py",
+      "root_cause": "Had \"path to a constitution.toml; pins it as the ruler",
+      "fix": "Changed to \"path to a constitution.toml to grade against; the",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T06:07:03.619Z"
+    },
+    {
+      "id": "bug-032",
+      "timestamp": "2026-09-14T06:08:27.187Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_tier0_constitution_wiring.py",
+      "root_cause": "6 lines replaced/restructured",
+      "fix": "Rewrote 26→49 lines (6 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T06:08:27.187Z"
+    },
+    {
+      "id": "bug-033",
+      "timestamp": "2026-09-14T07:47:27.050Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_tier0_constitution_wiring.py",
+      "root_cause": "10 lines replaced/restructured",
+      "fix": "Rewrote 22→31 lines (10 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T07:47:27.050Z"
+    },
+    {
+      "id": "bug-034",
+      "timestamp": "2026-09-14T08:06:55.601Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_taste_score_constitution.py",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 3→6 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T08:06:55.601Z"
+    },
+    {
+      "id": "bug-035",
+      "timestamp": "2026-09-14T08:07:24.749Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_tier0_constitution_wiring.py",
+      "root_cause": "7 lines replaced/restructured",
+      "fix": "Rewrote 9→11 lines (7 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T08:07:24.749Z"
+    },
+    {
+      "id": "bug-036",
+      "timestamp": "2026-09-14T08:34:45.677Z",
+      "error_message": "Significant refactor of ",
+      "file": "tests/test_packaging.py",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 5→8 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "py"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-14T08:34:45.677Z"
     }
   ]
 }

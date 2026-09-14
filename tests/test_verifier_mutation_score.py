@@ -263,8 +263,11 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     bound, and a module-level function whose every return is a method call on its own parameter is
     transparent (the decision lives in the receiver's method, checked in this same module). The honest
     residual headroom moved one step deeper to ``cls-alias-delegation-hidden`` (the receiver is RENAMED
-    through a local alias before the hand-off, ``k = cls`` then ``_delegate(k)``): the hand-off no longer
-    names the tracked receiver, so the base builder is never reached. Each caught cheat level reveals a
+    through a local alias before the hand-off, ``k = cls`` then ``_delegate(k)``), which is now CAUGHT too:
+    the delegation look follows every local NAME denoting the tracked receiver. The residual moved one step
+    deeper again to ``attr-hold-delegation-hidden`` (the receiver is PARKED ON AN ATTRIBUTE before the
+    hand-off, ``cls._recv = cls`` then ``_delegate(cls._recv)``), where the argument is no longer a NAME at
+    all. Each caught cheat level reveals a
     subtler still-unsolved one, so verifier_strength stays honestly < 1.0 — the non-saturation ratchet
     keeps firing."""
     for p in _constitution().principles:
@@ -473,10 +476,21 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(cls_alias.text)  # valid Python
         run_alias = TraceabilityVerifier.classify(p.pattern, p.violations, cls_alias.text, p.id)
-        assert run_alias.did_expand is True, (
+        assert run_alias.did_expand is False, (
             f"{p.id} cls-alias-delegation-hidden fake (the receiver RENAMED through a local alias before "
-            f"the hand-off, ``k = cls`` then ``_delegate(k)``) is the new honest residual headroom and "
-            f"must still bless"
+            f"the hand-off, ``k = cls`` then ``_delegate(k)``) must now be rejected — the local names "
+            f"denoting the same receiver are followed to the base builder that binds the constant"
+        )
+        attr_hold = next(c for c in mutant_cases(p) if c.label == "attr-hold-delegation-hidden")
+        assert re.search(p.pattern, attr_hold.text), (
+            f"{p.id} attr-hold-delegation-hidden fake must carry the pattern, got {attr_hold.text!r}"
+        )
+        ast.parse(attr_hold.text)  # valid Python
+        run_hold = TraceabilityVerifier.classify(p.pattern, p.violations, attr_hold.text, p.id)
+        assert run_hold.did_expand is True, (
+            f"{p.id} attr-hold-delegation-hidden fake (the receiver PARKED ON AN ATTRIBUTE before the "
+            f"hand-off, ``cls._recv = cls`` then ``_delegate(cls._recv)``) is the new honest residual "
+            f"headroom and must still bless"
         )
 
 
@@ -1224,13 +1238,12 @@ def test_cls_arg_delegation_constant_is_now_rejected() -> None:
     assert run.safe is True
 
 
-def test_cls_alias_delegation_residual_is_headroom() -> None:
-    """The ratchet: once the receiver handed to a module-level helper is followed, the honest residual
-    moves one step deeper to the receiver RENAMED through a local alias before it leaves the class
-    (``create`` does ``k = cls`` then ``return _delegate(k)``). The delegation look binds a helper
-    parameter only when the argument IS the tracked receiver name, so an aliased hand-off is not
-    tracked, the base builder is never reached, the read is not proven a constant and the guard still
-    blesses. Carries the pattern, valid Python — this is what keeps verifier_strength honestly < 1.0."""
+def test_cls_alias_delegation_constant_is_now_rejected() -> None:
+    """The ratchet: the receiver RENAMED through a local alias before it leaves the class
+    (``create`` does ``k = cls`` then ``return _delegate(k)``) is followed now that the delegation look
+    ranges over every local NAME denoting the tracked receiver — so the base builder is reached, the read
+    is proven a constant and the fake is REJECTED. This closes the previous residual headroom
+    (``cls-alias-delegation-hidden``)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -1255,11 +1268,174 @@ def test_cls_alias_delegation_residual_is_headroom() -> None:
     ast.parse(guard)
     assert re.search(p.pattern, guard), "carries the pattern"
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, (
-        "a receiver renamed through a local alias before the hand-off is the new honest residual and "
-        "must still bless"
+    assert run.did_expand is False, (
+        "a receiver renamed through a local alias before the hand-off must now be rejected — the "
+        "alias names denoting the same receiver are followed to the base builder that binds the constant"
     )
-    assert run.safe is True
+
+
+def test_two_hop_alias_chain_is_rejected() -> None:
+    """The alias lookup is TRANSITIVE: ``j = cls`` then ``k = j`` still denotes the receiver, so a
+    chain of renames does not hide the base builder either."""
+    p = _constitution().principles[1]  # SEC-02
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        j = cls\n"
+        "        k = j\n"
+        "        return _delegate(k)\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, "a two-hop alias chain must not hide the base builder"
+
+
+def test_annotated_alias_is_followed() -> None:
+    """The alias form a cheater can also reach for is an ANNOTATED local (``k: object = cls``): it
+    denotes the same receiver, so it is followed too and the constant behind the base builder is
+    proven (REJECTED)."""
+    p = _constitution().principles[1]  # SEC-02
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        k: object = cls\n"
+        "        return _delegate(k)\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "an annotated alias denotes the same receiver and must be followed to the base builder"
+    )
+
+
+def test_alias_inside_a_nested_scope_is_not_the_outer_receiver() -> None:
+    """Scope rule, pinned: a name bound inside a NESTED function is that function's local, not the
+    enclosing method's, so the alias lookup must not reach into it — the hand-off argument stays
+    untracked and the resolver reports no constant (no over-tracking across scopes)."""
+    p = _constitution().principles[1]  # SEC-02
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        def _prep():\n"
+        "            k = cls\n"
+        "            return k\n"
+        "        return _delegate(k)\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "an alias bound in a nested scope is not the enclosing method's receiver — the hand-off "
+        "stays untracked, so no constant is proven and the guard is not condemned on a guess"
+    )
+
+
+def test_rebound_alias_is_not_tracked() -> None:
+    """Anti-over-rejection by construction: a name that is ALSO assigned from something else
+    (``k = cls`` in one branch, ``k = _spare()`` in the other) is NOT an alias — the lookup stays
+    conservative rather than guessing, so the guard keeps whatever decision it really makes."""
+    p = _constitution().principles[1]  # SEC-02
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls, flag):\n"
+        "        if flag:\n"
+        "            k = cls\n"
+        "        else:\n"
+        "            k = _spare()\n"
+        "        return _delegate(k)\n"
+        "    def check(self, action):\n"
+        "        return _make().create(action)._ALWAYS\n"
+        "def _spare():\n"
+        "    return object()\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a name rebound from a non-receiver is not an alias — the resolver must not guess, so the "
+        "guard keeps its (unresolvable, hence unproven) decision"
+    )
+
+
+def test_alias_delegation_that_decides_is_still_blessed() -> None:
+    """Anti-over-rejection for the alias rule: following an alias must never swallow a REAL decision.
+    The alias IS tracked here, yet the chain ends in a classmethod that decides against state
+    (``return path in cls._allowed``), so nothing is provably constant and the guard stays blessed."""
+    p = _constitution().principles[1]  # SEC-02
+    guard = (
+        "class SafetyGuard:\n"
+        "    _allowed = ()\n"
+        "    @classmethod\n"
+        "    def decide(cls, path):\n"
+        "        return path in cls._allowed\n"
+        "    @classmethod\n"
+        "    def create(cls, path):\n"
+        "        k = cls\n"
+        "        return _delegate(k, path)\n"
+        "    def check(self, action):\n"
+        "        return _make().create(action)\n"
+        "def _delegate(receiver, path):\n"
+        "    return receiver.decide(path)\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a real decision reached through a tracked alias must stay blessed (no over-rejection)"
+    )
 
 
 def test_receiver_handoff_that_decides_on_state_is_still_blessed() -> None:
@@ -1601,9 +1777,10 @@ def test_only_the_named_residual_families_stay_blessed() -> None:
 
     A verifier that blessed nothing would satisfy the non-saturation test for the wrong reason —
     the corpus keeps one family the resolver genuinely cannot reach yet, and this test names it:
-    the constant axis's ``cls-alias-delegation-hidden`` (the ``cls`` receiver is RENAMED through a
-    local alias before it is handed to the module-level helper, so the hand-off no longer names the
-    tracked receiver). Pinning the set by NAME means catching that knot forces this test red and a
+    the constant axis's ``attr-hold-delegation-hidden`` (the ``cls`` receiver is PARKED ON AN
+    ATTRIBUTE before it is handed to the module-level helper, ``cls._recv = cls`` then
+    ``_delegate(cls._recv)``, so the hand-off argument is not a NAME the alias lookup can follow).
+    Pinning the set by NAME means catching that knot forces this test red and a
     new, subtler residual to be added — the same ratchet discipline the constant chain has followed
     at every level, applied to the corpus as a whole.
     """
@@ -1616,4 +1793,4 @@ def test_only_the_named_residual_families_stay_blessed() -> None:
         ).did_expand
         and run.safe
     }
-    assert blessed == {"cls-alias-delegation-hidden"}, f"blessed families moved: {sorted(blessed)}"
+    assert blessed == {"attr-hold-delegation-hidden"}, f"blessed families moved: {sorted(blessed)}"

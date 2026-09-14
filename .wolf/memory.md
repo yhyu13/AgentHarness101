@@ -17,231 +17,28 @@
 | 00:42 | 100 任务路线图 + P0 目标2/3（无人值守调度 Scheduler + 多代理编排 Orchestrator）：先核对 crashed-maker 早已 fail-closed，写 doc/roadmap/100_tasks.md，再 TDD 落 scheduler.py/orchestrator.py | goal_loop/scheduler.py, goal_loop/orchestrator.py, goal_loop/__init__.py, tests/test_scheduler.py, tests/test_orchestrator.py, doc/roadmap/100_tasks.md, JOURNEY.md, README.md, .wolf/STATUS.md, .wolf/cerebrum.md | 154 passed / 覆盖 93.79% / 两新模块 100% | 中 |
 
 ## Session: 2026-08-29 21:52
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 22:05 | Synced stale Kilo hook pre-read.ts (SDD block) from template | .kilo/plugin/openwolf/pre-read.ts | identical to openwolf src | ~0 tok |
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-30 22:16
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-30 22:17
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 22:25 | Edited tests/test_faux_provider.py | modified test_stream_yields_reply_and_records_call() | ~334 |
-| 22:26 | Edited README.md | modified LLM() | ~118 |
-| 22:26 | Edited README.md | 6→11 lines | ~232 |
-| 22:27 | Edited README.md | 8→11 lines | ~118 |
-| 22:27 | Edited README.md | 3→7 lines | ~123 |
-| 22:27 | Edited JOURNEY.md | inline fix | ~42 |
-| 22:27 | Edited doc/04_faux_provider/journey.md | 2→2 lines | ~35 |
-| 22:30 | Session end: 7 writes across 4 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md) | 8 reads | ~11363 tok |
-| 22:31 | 收口：判 provider.py:121-124 为行为（非死代码）+ 补 monkeypatch-sleep 确定性测试；README 补三模块+测试总数126+覆盖率闸门；勾掉 JOURNEY/doc 风险条目；STATUS 推进、cerebrum 记学习 | tests/test_faux_provider.py, README.md, JOURNEY.md, doc/04_faux_provider/journey.md, .wolf/STATUS.md, .wolf/cerebrum.md | 126 passed / 覆盖率 93.11 过 92 闸门 | ~4.5k |
-| 22:31 | Session end: 7 writes across 4 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md) | 8 reads | ~11363 tok |
-| 22:32 | Session end: 7 writes across 4 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md) | 8 reads | ~11363 tok |
-| 22:36 | Session end: 7 writes across 4 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md) | 10 reads | ~16498 tok |
-| 22:47 | Session end: 7 writes across 4 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md) | 11 reads | ~16639 tok |
-| 22:53 | Edited CLAUDE.md | expanded (+17 lines) | ~161 |
-| 22:53 | Edited AGENTS.md | expanded (+15 lines) | ~163 |
-| 22:53 | Edited .claude/rules/openwolf.md | reduced (-7 lines) | ~110 |
-| 22:54 | Session end: 10 writes across 7 files (test_faux_provider.py, README.md, JOURNEY.md, journey.md, CLAUDE.md) | 13 reads | ~17493 tok |
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-30 23:02
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-30 23:02
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 15:0X | push to origin/main: committed 86 files (world verifier, faux_provider, coverage gate, agent configs); excluded .wolf/ + node_modules | d17d7c2 | pushed a155c6a..d17d7c2 | ~400 |
-| 23:08 | Created doc/reference_harness/harness_skills.md | — | ~937 |
-| 23:09 | Created tests/test_self_improver.py | — | ~2094 |
-| 23:10 | Created goal_loop/self_improver.py | — | ~959 |
-| 23:10 | Edited hippocampus/memory.py | modified retrospective() | ~98 |
-| 23:11 | Edited goal_loop/loop_runner.py | added 1 import(s) | ~42 |
-| 23:11 | Edited goal_loop/loop_runner.py | 3→4 lines | ~48 |
-| 23:11 | Edited goal_loop/loop_runner.py | 2→3 lines | ~37 |
-| 23:11 | Edited goal_loop/loop_runner.py | 4→9 lines | ~116 |
-| 23:11 | Edited goal_loop/loop_runner.py | modified _finalize() | ~174 |
-| 23:11 | Edited goal_loop/__init__.py | added 1 import(s) | ~49 |
-| 23:11 | Edited goal_loop/__init__.py | 4→5 lines | ~27 |
-| 23:13 | Edited tests/test_self_improver.py | modified test_relevant_lessons_empty_objective_matches_nothing() | ~135 |
-| 23:14 | Created doc/07_self_improve/plan.md | — | ~992 |
-| 23:15 | Created doc/07_self_improve/benchmark.md | — | ~389 |
-| 23:15 | Created doc/07_self_improve/journey.md | — | ~740 |
-| 23:16 | Edited README.md | 1→2 lines | ~80 |
-| 23:16 | Edited README.md | 1→2 lines | ~53 |
-| 23:16 | Edited README.md | 4→4 lines | ~75 |
-| 23:16 | Edited README.md | 2→5 lines | ~98 |
-| 23:17 | Edited JOURNEY.md | expanded (+10 lines) | ~211 |
-| 23:19 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:21 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:22 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:22 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:22 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:23 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:23 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:23 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:23 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 23:24 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:46 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:46 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:46 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
-| 08:47 | Session end: 20 writes across 11 files (harness_skills.md, test_self_improver.py, self_improver.py, memory.py, loop_runner.py) | 20 reads | ~36320 tok |
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-31 08:50
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 10:40 | Edited CLAUDE.md | inline fix | ~42 |
-| 10:40 | Edited CLAUDE.md | 3→5 lines | ~34 |
-| 10:41 | Edited CLAUDE.md | 1→3 lines | ~36 |
-| 10:47 | 收口：CLAUDE.md 三处 fix（补测试命令、debug 纪律优先级、round report 短路规则）+ 定位并修 .wolf/hooks/stop.js 的 buglog 对 .md 误报 | CLAUDE.md, .wolf/hooks/stop.js | 文档改定 + hook 误报修复 | 中 |
-| 10:41 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:42 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:42 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:43 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:45 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:45 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:46 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:47 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 10:51 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 11:08 | Session end: 3 writes across 1 files (CLAUDE.md) | 5 reads | ~4537 tok |
-| 11:18 | Edited .gitignore | — | ~120 |
-| 11:19 | Session end: 4 writes across 2 files (CLAUDE.md, .gitignore) | 5 reads | ~4666 tok |
-| 11:38 | Edited pyproject.toml | reduced (-12 lines) | ~29 |
-| 11:38 | Edited tests/test_coverage_gate.py | modified test_coverage_run_has_source_branch_omit() | ~187 |
-| 11:40 | Edited tests/test_goal_loop.py | "goal_loop" → "src" | ~28 |
-| 11:41 | Session end: 7 writes across 5 files (CLAUDE.md, .gitignore, pyproject.toml, test_coverage_gate.py, test_goal_loop.py) | 8 reads | ~12185 tok |
-| 11:45 | Session end: 7 writes across 5 files (CLAUDE.md, .gitignore, pyproject.toml, test_coverage_gate.py, test_goal_loop.py) | 8 reads | ~12185 tok |
+> Consolidated session (21 actions)
 
 ## Session: 2026-08-31 00:06
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
+> Consolidated session (0 actions)
 
 ## Session: 2026-08-31 00:20
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 00:27 | Edited JOURNEY.md | expanded (+12 lines) | ~166 |
-| 00:29 | Created doc/roadmap/100_tasks.md | — | ~1976 |
-| 00:29 | Edited doc/roadmap/100_tasks.md | inline fix | ~37 |
-| 00:29 | Edited doc/roadmap/100_tasks.md | expanded (+14 lines) | ~280 |
-| 00:32 | Created tests/test_scheduler.py | — | ~1490 |
-| 00:33 | Created tests/test_orchestrator.py | — | ~1119 |
-| 00:33 | Created src/goal_loop/scheduler.py | — | ~1252 |
-| 00:33 | Created src/goal_loop/orchestrator.py | — | ~767 |
-| 00:34 | Edited src/goal_loop/__init__.py | added 2 import(s) | ~100 |
-| 00:34 | Edited src/goal_loop/__init__.py | 5→9 lines | ~46 |
-| 00:36 | Edited tests/test_scheduler.py | modified test_active_goals_returns_continuations() | ~98 |
-| 00:39 | Edited README.md | 1→3 lines | ~116 |
-| 00:39 | Edited README.md | 139 → 154 | ~20 |
-| 00:39 | Edited JOURNEY.md | expanded (+12 lines) | ~235 |
-| 00:40 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
-| 00:41 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
-| 00:41 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
-| 00:42 | Session end: 14 writes across 8 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 15 reads | ~36227 tok |
-| 00:44 | Edited src/eval_harness/judge.py | added 1 import(s) | ~50 |
-| 00:45 | Edited src/eval_harness/judge.py | modified __init__() | ~623 |
-| 00:45 | Edited src/eval_harness/__init__.py | 12→13 lines | ~84 |
-| 00:45 | Edited src/cost_control/cost.py | modified estimate_cost() | ~332 |
-| 00:45 | Edited src/cost_control/__init__.py | expanded (+7 lines) | ~64 |
-| 00:46 | Edited src/observability/trace.py | added 2 import(s) | ~60 |
-| 00:46 | Edited src/observability/trace.py | modified messages() | ~212 |
-| 00:46 | Created tests/test_p1_hardening.py | — | ~801 |
-| 00:47 | Created src/cost_control/ledger.py | — | ~588 |
-| 00:48 | Edited src/cost_control/__init__.py | added 1 import(s) | ~82 |
-| 00:48 | Edited tests/test_p1_hardening.py | 3→3 lines | ~40 |
-| 00:48 | Edited tests/test_p1_hardening.py | modified test_span_appends_even_on_exception() | ~460 |
-| 00:51 | Edited tests/test_adversarial_boundaries.py | modified test_goal_state_does_not_cross_contaminate() | ~438 |
-| 00:52 | Edited pyproject.toml | expanded (+14 lines) | ~113 |
-| 00:52 | Edited tests/test_harness.py | 2→2 lines | ~22 |
-| 00:52 | Edited tests/test_adversarial_boundaries.py | 6→6 lines | ~93 |
-| 00:52 | Edited tests/test_harness.py | 2→2 lines | ~24 |
-| 00:53 | Edited tests/test_efficiency.py | inline fix | ~6 |
-| 00:53 | Created scripts/check.sh | — | ~76 |
-| 00:54 | Edited tests/test_goal_loop.py | modified test_accepts_argv_list() | ~163 |
-| 00:56 | Created doc/08_scheduler/plan.md | — | ~836 |
-| 00:56 | Created doc/08_scheduler/journey.md | — | ~592 |
-| 00:57 | Created doc/09_orchestrator/plan.md | — | ~850 |
-| 00:57 | Created doc/09_orchestrator/journey.md | — | ~583 |
-| 00:58 | Edited README.md | 9→9 lines | ~112 |
-| 00:58 | Edited JOURNEY.md | expanded (+8 lines) | ~396 |
-| 00:59 | Created tests/test_path_policy.py | — | ~497 |
-| 00:59 | Created src/sandbox/path_policy.py | — | ~375 |
-| 00:59 | Edited src/sandbox/__init__.py | added 1 import(s) | ~65 |
-| 01:02 | Created tests/test_guard_branches.py | — | ~2526 |
-| 01:05 | Edited tests/test_p1_hardening.py | modified test_timeout_is_fail_closed() | ~234 |
-| 01:07 | Edited doc/04_faux_provider/benchmark.md | 5→10 lines | ~118 |
-| 01:07 | Edited examples/llm_goal_loop.py | inline fix | ~21 |
-| 01:11 | Session end: 47 writes across 26 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 44 reads | ~78272 tok |
-| 09:31 | Edited examples/llm_goal_loop.py | modified block() | ~84 |
-| 09:32 | Edited examples/llm_goal_loop.py | 3→6 lines | ~118 |
-| 09:34 | Edited examples/llm_goal_loop.py | 3→4 lines | ~84 |
-| 09:35 | Edited doc/04_faux_provider/benchmark.md | expanded (+14 lines) | ~350 |
-| 09:37 | Session end: 51 writes across 26 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 44 reads | ~79043 tok |
-| 10:10 | Session end: 51 writes across 26 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 44 reads | ~79043 tok |
-| 10:24 | Edited JOURNEY.md | expanded (+9 lines) | ~584 |
-| 10:25 | Edited README.zh-CN.md | expanded (+15 lines) | ~180 |
-| 10:25 | Edited README.zh-CN.md | 19→21 lines | ~272 |
-| 10:25 | Edited README.zh-CN.md | inline fix | ~25 |
-| 10:26 | Session end: 55 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~81643 tok |
-| 10:36 | Edited README.md | 4→4 lines | ~75 |
-| 10:36 | Edited README.md | inline fix | ~36 |
-| 10:36 | Edited README.md | 4→5 lines | ~45 |
-| 10:37 | Edited README.md | modified Configuration() | ~98 |
-| 10:37 | Session end: 59 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~81939 tok |
-| 10:51 | Edited README.zh-CN.md | inline fix | ~14 |
-| 10:51 | Edited README.zh-CN.md | inline fix | ~14 |
-| 10:51 | Edited README.zh-CN.md | inline fix | ~15 |
-| 10:51 | Edited README.md | inline fix | ~17 |
-| 10:51 | Edited README.md | inline fix | ~19 |
-| 10:52 | Session end: 64 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~82079 tok |
-| 11:32 | Session end: 64 writes across 27 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 45 reads | ~82079 tok |
-| 11:43 | Created doc/10_real_llm_eval/design.md | — | ~1020 |
-| 11:44 | Created doc/10_real_llm_eval/plan.md | — | ~505 |
-| 11:45 | Edited pyproject.toml | 3→5 lines | ~59 |
-| 11:46 | Created tests/test_real_llm_adapter.py | — | ~998 |
-| 11:46 | Created eval_llm/__init__.py | — | ~82 |
-| 11:47 | Created eval_llm/client.py | — | ~1457 |
-| 11:47 | Created tests/test_real_llm_report.py | — | ~362 |
-| 11:48 | Created eval_llm/report.py | — | ~543 |
-| 11:54 | Created tests/test_real_llm.py | — | ~3380 |
-| 11:54 | Edited pyproject.toml | 5→8 lines | ~82 |
-| 11:56 | Edited tests/test_real_llm_adapter.py | modified test_load_env_parses_dotenv_and_prefers_process_env() | ~192 |
-| 12:07 | Edited tests/test_real_llm.py | modified test_breadth_llmjudge_fail_closed() | ~172 |
-| 12:07 | Edited tests/test_real_llm.py | modified summarize() | ~82 |
-| 12:09 | Edited eval_llm/report.py | 4→4 lines | ~43 |
-| 12:09 | Edited eval_llm/report.py | 4→4 lines | ~60 |
-| 12:09 | Edited tests/test_real_llm_report.py | 6→7 lines | ~79 |
-| 12:13 | Edited JOURNEY.md | expanded (+8 lines) | ~270 |
-| 12:16 | Edited README.md | expanded (+15 lines) | ~249 |
-| 12:17 | Edited README.zh-CN.md | inline fix | ~20 |
-| 12:18 | Edited README.zh-CN.md | 2→2 lines | ~52 |
-| 12:18 | Edited README.zh-CN.md | expanded (+11 lines) | ~167 |
-| 12:18 | Edited README.zh-CN.md | inline fix | ~15 |
-| 12:20 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
-| 12:28 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
-| 12:32 | Session end: 86 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~92952 tok |
-| 12:41 | Edited README.zh-CN.md | reduced (-12 lines) | ~269 |
-| 12:42 | Edited README.md | expanded (+8 lines) | ~453 |
-| 12:42 | Edited README.md | 3→3 lines | ~51 |
-| 12:42 | Session end: 89 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~94102 tok |
-| 13:12 | Edited README.zh-CN.md | 7→9 lines | ~181 |
-| 13:13 | Edited README.md | 7→9 lines | ~294 |
-| 13:14 | Session end: 91 writes across 33 files (JOURNEY.md, 100_tasks.md, test_scheduler.py, test_orchestrator.py, scheduler.py) | 46 reads | ~94611 tok |
+> Consolidated session (107 actions)
 
 ## Session: 2026-09-01 13:22
 
@@ -343,3 +140,272 @@
 | 23:22 | Edited tests/test_packaging.py | _packages() → line() | ~95 |
 | 23:24 | Edited pyproject.toml | 4→4 lines | ~25 |
 | 23:26 | Edited tests/test_harness_layers.py | 3→2 lines | ~10 |
+| 23:31 | Session end: 66 writes across 29 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 58 reads | ~103777 tok |
+| 00:05 | Session end: 66 writes across 29 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 58 reads | ~103777 tok |
+| 10:17 | Session end: 66 writes across 29 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 58 reads | ~103777 tok |
+| 10:21 | Session end: 66 writes across 29 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 58 reads | ~103777 tok |
+| 10:41 | Created doc/superpowers/specs/2026-09-02-taste-score-design.md | — | ~818 |
+| 10:42 | Created tests/test_taste_score.py | — | ~1460 |
+| 10:42 | Created src/taste_score/__init__.py | — | ~213 |
+| 10:43 | Created src/taste_score/models.py | — | ~613 |
+| 10:43 | Created src/taste_score/judge.py | — | ~528 |
+| 10:43 | Created src/taste_score/mutator.py | — | ~497 |
+| 10:44 | Created src/taste_score/gate.py | — | ~1258 |
+| 10:44 | Edited src/taste_score/gate.py | 2→2 lines | ~26 |
+| 10:44 | Edited src/taste_score/gate.py | TasteScore() → replace() | ~24 |
+| 10:44 | Edited tests/test_taste_score.py | 6→7 lines | ~102 |
+| 10:45 | Created src/taste_score/gate.py | — | ~1456 |
+| 10:45 | Edited tests/test_taste_score.py | modified test_self_report_lie_is_overridden_by_verify() | ~307 |
+| 10:46 | Created src/taste_score/source.py | — | ~1100 |
+| 10:46 | Created src/taste_score/__main__.py | — | ~1151 |
+| 10:47 | Created src/taste_score/py.typed | — | ~0 |
+| 10:47 | Edited tests/test_taste_score.py | added 4 import(s) | ~66 |
+| 10:47 | Edited tests/test_taste_score.py | modified test_build_initial_probes_reads_real_sources() | ~352 |
+| 10:47 | Edited tests/test_coverage_gate.py | 3→4 lines | ~18 |
+| 10:50 | Edited CLAUDE.md | expanded (+24 lines) | ~239 |
+| 10:51 | Edited AGENTS.md | expanded (+22 lines) | ~231 |
+| 10:52 | Session end: 86 writes across 36 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 61 reads | ~116491 tok |
+
+## 2026-09-02 CSDD paper (2602.02584v1) research
+- **CSDD (Constitutional Spec-Driven Development)**: embed non-negotiable security principles into the SPEC layer as a machine-readable, versioned **Constitution** (CWE-mapped, RFC2119 MUST/SHOULD/MAY, rationale). Secure by construction, not inspection.
+- **Pipeline**: Constitution(apex) -> spec/plan/tasks -> AI generation (Generator+Validator) -> implementation -> Compliance Traceability Matrix (Principle -> File:Line).
+- **Spec layer** = spec.md(what) / plan.md(how) / tasks.md(atomic).
+- **Tooling**: Speckit (github/spec-kit), slash cmds /speckit.constitution|specify|plan|tasks|implement.
+- **Results**: 73 0.000000ewer CWE violations, 56 0.000000aster first secure build, 4.3x compliance coverage, 75 0.000000ewer review iters.
+- **L4 (spec- poisoning)**: constitution consumed by LLM as text = injection surface; must resist adversarial weaken (declarative, no conditional overrides, integrity verification). == anti-Goodhart "protect the ruler".
+- **L5 (context mgmt)**: 3-5 task-relevant principles (96 ompliance) beat full constitution (78
+## 2026-09-02 CSDD paper (2602.02584v1) research
+- **CSDD (Constitutional Spec-Driven Development)**: embed non-negotiable security principles into the SPEC layer as a machine-readable, versioned **Constitution** (CWE-mapped, RFC2119 MUST/SHOULD/MAY, rationale). Secure by construction, not inspection.
+- **Pipeline**: Constitution(apex) -> spec/plan/tasks -> AI generation (Generator+Validator) -> implementation -> Compliance Traceability Matrix (Principle -> File:Line).
+- **Spec layer** = spec.md(what) / plan.md(how) / tasks.md(atomic).
+- **Tooling**: Speckit (github/spec-kit), slash cmds /speckit.constitution|specify|plan|tasks|implement.
+- **Results**: 73% fewer CWE violations, 56% faster first secure build, 4.3x compliance coverage, 75% fewer review iters, 15 principles / 47 code locations.
+- **L4 (spec-poisoning)**: constitution consumed by LLM as text = injection surface; must resist adversarial weaken (declarative, no conditional overrides, integrity verification). == our anti-Goodhart "protect the ruler".
+- **L5 (context mgmt)**: 3-5 task-relevant principles (96% compliance) beat full constitution (78%).
+- **L7**: automated traceability 100% vs manual 94% — basis for static `verify` resolver.
+- **Limits**: bounded by known CWE classes; technical vulns only; spec-layer poisoning remains.
+- **Map to our taste_score**: constitution->S safety boundary; spec-driven probe gen->probe synthesis; traceability matrix->verify resolver evidence; constitution integrity->new anti-Goodhart lock against metric-weakening.
+| 15:20 | Session end: 86 writes across 36 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 62 reads | ~116491 tok |
+| 15:20 | Session end: 86 writes across 36 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 62 reads | ~116491 tok |
+| 15:29 | Session end: 86 writes across 36 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 62 reads | ~116491 tok |
+| 15:30 | Session end: 86 writes across 36 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 62 reads | ~116491 tok |
+| 16:27 | Created doc/superpowers/specs/2026-09-02-csdd-integration-design.md | — | ~2168 |
+| 16:27 | Session end: 87 writes across 37 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 62 reads | ~118813 tok |
+| 16:38 | Edited doc/superpowers/specs/2026-09-02-csdd-integration-design.md | expanded (+11 lines) | ~254 |
+| 16:38 | Edited doc/superpowers/specs/2026-09-02-csdd-integration-design.md | expanded (+10 lines) | ~216 |
+| 16:38 | Edited doc/superpowers/specs/2026-09-02-csdd-integration-design.md | expanded (+10 lines) | ~271 |
+| 16:38 | Edited doc/superpowers/specs/2026-09-02-csdd-integration-design.md | modified ratify() | ~270 |
+| 16:39 | Edited doc/superpowers/specs/2026-09-02-csdd-integration-design.md | 8→12 lines | ~242 |
+| 16:42 | Created docs/superpowers/plans/2026-09-02-csdd-integration.md | — | ~6425 |
+| 16:43 | Created tests/test_taste_score_constitution.py | — | ~667 |
+| 16:43 | Created src/taste_score/constitution.toml | — | ~234 |
+| 16:44 | Created src/taste_score/constitution.py | — | ~494 |
+| 16:44 | Edited tests/test_taste_score_constitution.py | added 1 import(s) | ~106 |
+| 16:44 | Edited tests/test_taste_score.py | modified test_build_initial_probes_reads_real_sources() | ~300 |
+| 16:45 | Edited src/taste_score/source.py | added 1 import(s) | ~49 |
+| 16:45 | Edited src/taste_score/source.py | modified build_initial_probes() | ~372 |
+| 16:45 | Edited tests/test_taste_score.py | modified test_traceability_verifier_uses_evidence_not_self_report() | ~567 |
+| 16:46 | Created src/taste_score/trace.py | — | ~389 |
+| 16:46 | Edited tests/test_taste_score.py | modified test_sixth_lock_rejects_ruler_tamper() | ~431 |
+| 16:46 | Edited src/taste_score/gate.py | added 1 import(s) | ~44 |
+| 16:47 | Edited src/taste_score/gate.py | added 1 condition(s) | ~342 |
+| 16:47 | Edited tests/test_taste_score.py | modified test_suggest_amendments_tightens_from_vetoed_rows() | ~362 |
+| 16:48 | Created src/taste_score/amendments.py | — | ~693 |
+| 16:48 | Edited tests/test_taste_score.py | modified test_compete_with_constitution_pins_digest_and_reports_amendments() | ~382 |
+| 16:49 | Edited src/taste_score/__main__.py | added 2 import(s) | ~83 |
+| 16:49 | Edited src/taste_score/__main__.py | modified build_constitution_verify() | ~300 |
+| 16:49 | Edited src/taste_score/__main__.py | modified compete() | ~490 |
+| 16:50 | Edited src/taste_score/__main__.py | modified range() | ~141 |
+| 16:50 | Edited src/taste_score/__main__.py | expanded (+11 lines) | ~281 |
+| 16:50 | Edited src/taste_score/trace.py | modified __init__() | ~107 |
+| 16:52 | Edited CLAUDE.md | expanded (+12 lines) | ~318 |
+| 16:53 | Edited AGENTS.md | expanded (+12 lines) | ~318 |
+| 16:56 | Edited tests/test_taste_score_constitution.py | inline fix | ~25 |
+| 16:57 | Session end: 117 writes across 42 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 64 reads | ~142359 tok |
+| 17:24 | Edited tests/test_taste_score_constitution.py | modified test_every_anchor_resolves_and_matches_pattern() | ~663 |
+| 17:24 | Edited src/taste_score/trace.py | modified verify() | ~522 |
+| 17:25 | Edited src/taste_score/trace.py | modified verify() | ~509 |
+| 17:26 | Edited src/taste_score/__main__.py | modified range() | ~449 |
+| 17:26 | Edited tests/test_taste_score.py | 5→8 lines | ~149 |
+| 17:27 | Edited src/taste_score/trace.py | 2→2 lines | ~31 |
+| 17:27 | Session end: 123 writes across 42 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 65 reads | ~145355 tok |
+| 17:53 | Session end: 123 writes across 42 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 67 reads | ~146496 tok |
+| 17:57 | Edited tests/test_taste_score_constitution.py | modified test_compliance_score_tracks_each_principle_implementation() | ~572 |
+| 17:57 | Edited src/taste_score/trace.py | modified compliance() | ~213 |
+| 17:57 | Edited src/taste_score/__main__.py | 2→5 lines | ~97 |
+| 17:58 | Edited src/taste_score/source.py | modified _from_constitution() | ~200 |
+| 17:58 | Edited tests/test_taste_score.py | 5→5 lines | ~114 |
+| 17:58 | Edited tests/test_taste_score.py | 3→5 lines | ~101 |
+| 17:59 | Session end: 129 writes across 42 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 67 reads | ~147793 tok |
+| 18:06 | Session end: 129 writes across 42 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 67 reads | ~147793 tok |
+| 19:55 | Created doc/taste_score/journey.md | — | ~707 |
+| 19:55 | Session end: 130 writes across 43 files (enhancements_100.md, test_harness_layers.py, sandbox.py, safety.py, models.py) | 67 reads | ~148551 tok |
+
+## Session: 2026-09-02 23:44
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-09-02 23:45
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:47 | Edited tests/test_taste_score.py | modified test_gate_falls_back_to_agent_when_verify_has_no_evidence() | ~539 |
+| 23:48 | Edited src/taste_score/trace.py | modified verify() | ~123 |
+| 23:48 | Edited src/taste_score/gate.py | inline fix | ~14 |
+| 23:48 | Edited src/taste_score/gate.py | modified run() | ~148 |
+| 23:48 | Edited src/taste_score/__main__.py | modified build_constitution_verify() | ~276 |
+| 23:49 | Edited src/taste_score/__main__.py | modified build_constitution_verify() | ~370 |
+| 23:49 | Edited src/taste_score/__main__.py | modified range() | ~202 |
+| 23:51 | Edited doc/taste_score/journey.md | expanded (+33 lines) | ~600 |
+| 23:52 | Session end: 8 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2315 tok |
+| 23:53 | FIXED cron AI-task EINVAL (spawnSync claude.cmd + shell:true in global openwolf, pm2 restart) + desegregated CSDD score (verify returns None for unanchored probes, gate falls back) | cron-engine.js, gate.py, trace.py, __main__.py, test_taste_score.py, journey.md | 296 passed/56 skipped, cov 95.42%，live cron cerebrum+suggestions OK | ~2400 |
+| 23:53 | Session end: 8 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2315 tok |
+| 07:36 | Edited doc/taste_score/journey.md | 1→2 lines | ~100 |
+| 07:36 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 07:45 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 07:50 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 07:53 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 07:58 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 08:03 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 08:09 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 08:14 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 08:29 | Session end: 9 writes across 5 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 3 reads | ~2422 tok |
+| 08:42 | Created tests/test_security_guards.py | — | ~508 |
+| 08:43 | Created src/sandbox/command_policy.py | — | ~400 |
+| 08:43 | Created src/security/__init__.py | — | ~24 |
+| 08:43 | Created src/security/injection_guard.py | — | ~378 |
+| 08:43 | Edited src/taste_score/constitution.toml | modified redact_value() | ~230 |
+| 08:45 | Edited doc/taste_score/journey.md | expanded (+14 lines) | ~207 |
+| 08:46 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 4 reads | ~4200 tok |
+| 08:46 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 08:59 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 09:14 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 09:29 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 09:44 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 09:59 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 10:14 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+| 10:29 | Session end: 15 writes across 10 files (test_taste_score.py, trace.py, gate.py, __main__.py, journey.md) | 5 reads | ~4200 tok |
+
+## Session: 2026-09-03 18:53
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-09-05 03:00
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-09-06 04:00
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-09-12 23:51
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-09-12 23:52
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 11:28 | Created doc/superpowers/specs/2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md | — | ~850 |
+| 11:30 | Created docs/superpowers/plans/2026-09-14-tier0-csdd-wiring-and-bugfixes.md | — | ~10652 |
+| 11:31 | Edited docs/superpowers/plans/2026-09-14-tier0-csdd-wiring-and-bugfixes.md | modified test_thread_id_cannot_escape_the_state_dir() | ~697 |
+| 11:31 | Edited docs/superpowers/plans/2026-09-14-tier0-csdd-wiring-and-bugfixes.md | inline fix | ~95 |
+| 11:31 | Edited docs/superpowers/plans/2026-09-14-tier0-csdd-wiring-and-bugfixes.md | 2→4 lines | ~42 |
+| 11:32 | Edited doc/superpowers/specs/2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md | 3→3 lines | ~43 |
+| 12:44 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | — | ~1642 |
+| 12:45 | Created tests/test_tier0_constitution_wiring.py | — | ~650 |
+| 12:45 | Edited src/taste_score/__main__.py | 7→10 lines | ~126 |
+| 12:45 | Edited src/taste_score/__main__.py | 4→4 lines | ~50 |
+| 12:48 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-1-report.md | — | ~2228 |
+| 12:49 | Edited tests/test_tier0_constitution_wiring.py | modified test_read_pin_prefers_the_environment() | ~560 |
+| 12:50 | Created src/taste_score/pin.py | — | ~396 |
+| 12:50 | Edited src/taste_score/__main__.py | added 1 import(s) | ~42 |
+| 12:50 | Edited src/taste_score/__main__.py | 2→3 lines | ~22 |
+| 12:50 | Edited src/taste_score/__main__.py | 1→3 lines | ~63 |
+| 12:50 | Edited src/taste_score/__main__.py | expanded (+6 lines) | ~98 |
+| 12:50 | Edited src/taste_score/__main__.py | 2→5 lines | ~61 |
+| 12:53 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-2-report.md | — | ~2322 |
+| 12:56 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~530 |
+| 12:57 | Edited tests/test_tier0_constitution_wiring.py | modified test_pareto_veto_reports_the_probe_that_was_conceded() | ~449 |
+| 12:57 | Edited src/taste_score/models.py | 2→3 lines | ~48 |
+| 12:57 | Edited src/taste_score/gate.py | 4→5 lines | ~76 |
+| 12:57 | Edited src/taste_score/__main__.py | 2→3 lines | ~33 |
+| 12:57 | Edited src/taste_score/__main__.py | 2→2 lines | ~41 |
+| 12:59 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-3-report.md | — | ~1892 |
+| 13:00 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~428 |
+| 13:01 | Edited tests/test_tier0_constitution_wiring.py | modified test_rank_vetoes_an_agent_that_trips_a_regression() | ~434 |
+| 13:01 | Edited src/taste_score/__main__.py | 10→12 lines | ~143 |
+| 13:01 | Edited src/taste_score/__main__.py | 3→4 lines | ~32 |
+| 13:01 | Edited src/taste_score/__main__.py | 4→5 lines | ~59 |
+| 13:04 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-4-report.md | — | ~2287 |
+| 13:09 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-4-report.md | modified print() | ~1351 |
+| 13:11 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~1165 |
+| 13:13 | Edited tests/test_persistence_resilience.py | added 2 import(s) | ~66 |
+| 13:13 | Edited tests/test_persistence_resilience.py | modified test_unquarantine_rearms_goal() | ~591 |
+| 13:13 | Edited src/goal_persistence/store.py | modified _ensure_schema() | ~118 |
+| 13:13 | Edited src/goal_persistence/store.py | modified _persist_on() | ~642 |
+| 13:15 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-5-report.md | — | ~2118 |
+| 13:18 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~1013 |
+| 13:19 | Edited tests/test_persistence_resilience.py | modified test_sqlite_runs_in_wal_mode() | ~660 |
+| 13:19 | Edited src/goal_persistence/store.py | modified _connect() | ~251 |
+| 13:19 | Edited src/goal_persistence/store.py | 13→15 lines | ~215 |
+| 13:19 | Edited src/goal_persistence/store.py | modified apply_usage() | ~66 |
+| 13:19 | Edited tests/test_persistence_resilience.py | 3→4 lines | ~96 |
+| 13:21 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-5-report.md | modified Command() | ~2312 |
+| 13:23 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~445 |
+| 13:24 | Edited tests/test_goal_loop.py | modified test_thread_id_cannot_escape_the_state_dir() | ~589 |
+| 13:24 | Edited src/goal_loop/loop_runner.py | modified _now() | ~135 |
+| 13:24 | Edited src/goal_loop/loop_runner.py | modified _load_state() | ~82 |
+| 13:24 | Edited src/goal_loop/loop_runner.py | 4→1 lines | ~21 |
+| 13:26 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-6-report.md | — | ~1664 |
+| 13:29 | Edited tests/test_goal_loop.py | modified test_load_state_is_safe_before_the_loop_has_run() | ~264 |
+| 13:29 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | modified minor() | ~962 |
+| 13:29 | Edited src/goal_loop/loop_runner.py | modified _load_state() | ~62 |
+| 13:33 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | expanded (+10 lines) | ~840 |
+| 13:34 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/progress.md | 1→3 lines | ~248 |
+| 13:34 | Edited tests/test_persistence_resilience.py | modified test_apply_usage_takes_the_write_lock_before_it_reads() | ~411 |
+| 13:35 | Edited src/goal_persistence/models.py | 11→16 lines | ~221 |
+| 13:37 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-7-report.md | — | ~2727 |
+| 13:37 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-7-report.md | inline fix | ~115 |
+| 13:37 | Edited .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-7-report.md | 1→3 lines | ~214 |
+| 13:39 | Edited tests/test_orchestrator.py | modified test_orchestrator_runs_goal_loop_to_completion() | ~521 |
+| 13:39 | Edited src/goal_loop/orchestrator.py | 7→9 lines | ~107 |
+| 13:40 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-8-report.md | — | ~2720 |
+| 13:43 | Edited tests/test_context_compaction.py | modified test_compaction_result_to_dict_serializes_slots_items() | ~327 |
+| 13:43 | Edited src/context_compaction/models.py | inline fix | ~12 |
+| 13:43 | Edited src/context_compaction/models.py | 2→2 lines | ~36 |
+| 13:46 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/task-9-report.md | — | ~2688 |
+| 14:07 | Edited src/taste_score/__main__.py | 1→2 lines | ~45 |
+| 14:07 | Edited tests/test_tier0_constitution_wiring.py | modified test_compete_vetoes_every_agent_when_the_ruler_was_tampered() | ~469 |
+| 14:08 | Edited tests/test_tier0_constitution_wiring.py | modified _run_cli() | ~585 |
+| 14:10 | Created .superpowers/sdd/2026-09-14-tier0-csdd-wiring-and-bugfixes/final-fix-report.md | — | ~2791 |
+| 14:14 | Session end: 73 writes across 25 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 158 reads | ~149459 tok |
+| 15:00 | Session end: 73 writes across 25 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 162 reads | ~151911 tok |
+| 15:15 | Session end: 73 writes across 25 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 165 reads | ~153977 tok |
+| 15:46 | Edited tests/test_taste_score_constitution.py | 5→9 lines | ~122 |
+| 15:46 | Edited tests/test_taste_score_constitution.py | 5→8 lines | ~85 |
+| 15:46 | Edited tests/test_packaging.py | 7→11 lines | ~116 |
+| 15:47 | Edited tests/test_tier0_constitution_wiring.py | modified test_cli_pin_flag_vetoes_a_ruler_the_pin_does_not_name() | ~473 |
+| 15:47 | Edited tests/test_packaging.py | 11→10 lines | ~122 |
+| 15:51 | Session end: 78 writes across 27 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 178 reads | ~169535 tok |
+| 16:06 | Edited tests/test_taste_score_constitution.py | 3→6 lines | ~130 |
+| 16:06 | Edited tests/test_packaging.py | locale() → layers() | ~164 |
+| 16:07 | Edited tests/test_tier0_constitution_wiring.py | modified _no_ambient_pin() | ~313 |
+| 16:07 | Edited tests/test_tier0_constitution_wiring.py | 9→11 lines | ~214 |
+| 16:07 | Edited tests/test_tier0_constitution_wiring.py | 3→7 lines | ~144 |
+| 16:07 | Edited tests/test_tier0_constitution_wiring.py | 4→5 lines | ~79 |
+| 16:10 | Session end: 84 writes across 27 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 180 reads | ~182456 tok |
+| 16:34 | Edited tests/test_taste_score.py | modified test_compete_with_constitution_pins_digest_and_reports_amendments() | ~265 |
+| 16:34 | Edited tests/test_taste_score.py | added 1 import(s) | ~23 |
+| 16:34 | Edited tests/test_packaging.py | 5→8 lines | ~190 |
+| 17:06 | Session end: 87 writes across 28 files (2026-09-14-tier0-csdd-wiring-and-bugfixes-design.md, 2026-09-14-tier0-csdd-wiring-and-bugfixes.md, progress.md, test_tier0_constitution_wiring.py, __main__.py) | 180 reads | ~182934 tok |
+
+## Session: 2026-09-14 17:28
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|

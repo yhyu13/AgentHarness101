@@ -492,24 +492,79 @@ def _factory_receiver(
     return None, None
 
 
+def _collect_assignments(stmt: ast.stmt, out: list[tuple[list[ast.expr], ast.expr]]) -> None:
+    """Collect every assignment in ``stmt`` as ``(targets, value)``, descending through control
+    flow but NOT into a nested function/class (a nested scope's locals are its own)."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return
+    if isinstance(stmt, ast.Assign):
+        out.append((stmt.targets, stmt.value))
+    elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+        out.append(([stmt.target], stmt.value))
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, ast.stmt):
+            _collect_assignments(child, out)
+
+
+def _receiver_names(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef | None, receiver_name: str | None
+) -> tuple[str, ...]:
+    """Every LOCAL NAME that denotes the tracked receiver inside ``fn`` — canonical name first.
+
+    A receiver can be RENAMED before it leaves the class (``create`` does ``k = cls`` then
+    ``return _delegate(k)``) or between delegation hops (``j = k`` inside the helper). Following those
+    names is what keeps a rename from hiding the base builder that binds the constant.
+
+    Conservative by construction: a name counts only when EVERY assignment to it in ``fn`` is another
+    tracked name, so a name that is ALSO bound from anything else (``k = cls`` in one branch,
+    ``k = _spare()`` in another) is not an alias and the chain stays honestly un-resolved rather than
+    guessed at. Returned as an ordered tuple (never a set) so a verdict can never depend on hash
+    iteration order.
+    """
+    if fn is None or not receiver_name:
+        return ()
+    assigns: list[tuple[list[ast.expr], ast.expr]] = []
+    for stmt in fn.body:
+        _collect_assignments(stmt, assigns)
+    values: dict[str, list[ast.expr]] = {}
+    for targets, value in assigns:
+        for target in targets:
+            if isinstance(target, ast.Name):
+                values.setdefault(target.id, []).append(value)
+    names = [receiver_name]
+    changed = True
+    while changed:
+        changed = False
+        for name, bound in values.items():
+            if name in names:
+                continue
+            if bound and all(isinstance(v, ast.Name) and v.id in names for v in bound):
+                names.append(name)
+                changed = True
+    return tuple(names)
+
+
 def _handed_receiver_param(
     call: ast.Call,
     callee: ast.FunctionDef | ast.AsyncFunctionDef,
-    receiver_name: str,
+    receiver_names: tuple[str, ...],
 ) -> str | None:
-    """The parameter name that RECEIVES ``receiver_name`` at this call site, or ``None``.
+    """The parameter name that RECEIVES the tracked receiver at this call site, or ``None``.
 
     A ``@classmethod`` can hand its ``cls`` receiver to a MODULE-LEVEL helper
     (``create()`` returns ``_delegate(cls)``); inside the helper the receiver has the helper's
     parameter name (``def _delegate(k)`` -> ``return k.build()``), so that name is what a delegation
-    inside the helper must be resolved against. Only a POSITIONAL argument that is LITERALLY the
-    tracked receiver name is bound, and the parameter must be a plain positional parameter: a
-    relabelled hand-off (``k = cls`` then ``_delegate(k)``) or a keyword hand-off is deliberately not
-    tracked, so that residual stays honestly un-resolved instead of being guessed at.
+    inside the helper must be resolved against. Every POSITIONAL argument that is one of the tracked
+    receiver NAMES is bound — ``_delegate(cls)`` and ``k = cls`` then ``_delegate(k)`` hand over the
+    same receiver, so a rename does not break the chain (see ``_receiver_names``) — and the parameter
+    must be a plain positional parameter. A hand-off whose argument is not a tracked NAME at all (the
+    receiver parked on an attribute: ``cls._recv = cls`` then ``_delegate(cls._recv)``) or a keyword
+    hand-off is deliberately not tracked, so that residual stays honestly un-resolved instead of being
+    guessed at.
     """
     params = [*getattr(callee.args, "posonlyargs", []), *callee.args.args]
     for index, arg in enumerate(call.args):
-        if isinstance(arg, ast.Name) and arg.id == receiver_name:
+        if isinstance(arg, ast.Name) and arg.id in receiver_names:
             return params[index].arg if index < len(params) else None
     return None
 
@@ -520,11 +575,12 @@ def _sibling_method_factory_receiver(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     _depth: int = 0,
-    cls_name: str | None = None,
+    receiver_names: tuple[str, ...] = (),
 ) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
     """``(class, factory_method)`` for a delegation whose return expr calls a SIBLING method of
-    ``class_def`` — either a bare-Name call (``create()`` returns ``_build()``) or, when ``cls_name`` is
-    given, an attribute call on the ``@classmethod`` receiver (``create()`` returns ``cls.build()``).
+    ``class_def`` — either a bare-Name call (``create()`` returns ``_build()``) or, when the receiver's
+    names are given, an attribute call on the ``@classmethod`` receiver (``create()`` returns
+    ``cls.build()``).
 
     ``_factory_receiver`` resolves a module-level factory FUNCTION (a bare Name in ``sources``) or an
     attribute call on a class NAME (``_Helper._build()``) — but a delegation whose return expr calls a method
@@ -542,7 +598,10 @@ def _sibling_method_factory_receiver(
     the sibling is not a resolvable factory. A call to a MODULE-LEVEL HELPER that RECEIVES the tracked
     receiver as an argument (``create()`` returns ``_delegate(cls)``) is a delegation too: the helper's
     parameter bound to that argument names the receiver inside the helper, so the helper's own returns
-    are resolved with that parameter as the receiver name and the base builder is still reached."""
+    are resolved with that parameter as the receiver name and the base builder is still reached.
+    ``receiver_names`` is every LOCAL NAME denoting the tracked receiver at this site, not just the
+    canonical one (see ``_receiver_names``): a rename (``k = cls`` then ``_delegate(k)``) therefore keeps
+    the chain alive, and the alias set is recomputed for the body the return expr actually lives in."""
     if _depth > 8:
         return None, None
     if not isinstance(value, ast.Call):
@@ -550,10 +609,10 @@ def _sibling_method_factory_receiver(
     if isinstance(value.func, ast.Name):
         method_name = value.func.id
     elif (
-        cls_name is not None
+        receiver_names
         and isinstance(value.func, ast.Attribute)
         and isinstance(value.func.value, ast.Name)
-        and value.func.value.id == cls_name
+        and value.func.value.id in receiver_names
     ):
         # A delegation through the `cls` receiver itself (`return cls.build()`): the attribute names a
         # method of the class the @classmethod was called on, i.e. `class_def`.
@@ -570,16 +629,23 @@ def _sibling_method_factory_receiver(
         # resolve the helper's OWN returns with that parameter as the receiver name, so the chain still
         # reaches the base builder. Only a module-level function written with the tracked receiver name
         # is followed (see ``_handed_receiver_param``).
-        if isinstance(value.func, ast.Name) and cls_name is not None and sources:
+        if isinstance(value.func, ast.Name) and receiver_names and sources:
             handed = sources.get(value.func.id)
             if handed is not None:
-                param = _handed_receiver_param(value, handed, cls_name)
+                param = _handed_receiver_param(value, handed, receiver_names)
                 if param is not None:
                     for r in _collect_returns_of(handed):
                         sub = _factory_receiver(r.value, sources, classes, _depth + 1)
                         if sub[0] is None:
+                            # Resolve the helper's OWN returns against the names the receiver has INSIDE
+                            # the helper: a rename there (``j = k``) is still the same receiver.
                             sub = _sibling_method_factory_receiver(
-                                r.value, class_def, sources, classes, _depth + 1, param
+                                r.value,
+                                class_def,
+                                sources,
+                                classes,
+                                _depth + 1,
+                                _receiver_names(handed, param),
                             )
                         if sub[0] is not None:
                             return sub
@@ -587,14 +653,19 @@ def _sibling_method_factory_receiver(
     # The receiver name of THIS sibling hop: a ``@classmethod`` names its own receiver with its first arg
     # (``cls``), which is the name an attribute delegation inside its body targets. Inherit the caller's
     # name when the sibling is not a classmethod, so a ``cls``-receiver chain keeps resolving at each hop.
-    inner_cls_name = cls_name
+    inner_name = receiver_names[0] if receiver_names else None
     if _is_classmethod(method) and method.args.args:
-        inner_cls_name = method.args.args[0].arg
+        inner_name = method.args.args[0].arg
     for r in _collect_returns_of(method):
         sub = _factory_receiver(r.value, sources, classes, _depth + 1)
         if sub[0] is None:
             sub = _sibling_method_factory_receiver(
-                r.value, class_def, sources, classes, _depth + 1, inner_cls_name
+                r.value,
+                class_def,
+                sources,
+                classes,
+                _depth + 1,
+                _receiver_names(method, inner_name),
             )
         if sub[0] is not None:
             return sub
@@ -686,7 +757,7 @@ def _class_factory_receiver(
             # ``_factory_receiver`` misses it. Recurse into the sibling method's own factory resolution
             # to reach the base builder that directly constructs the class.
             sub = _sibling_method_factory_receiver(
-                r.value, cls, sources, classes, _depth + 1, cls_name
+                r.value, cls, sources, classes, _depth + 1, _receiver_names(method, cls_name)
             )
         if sub[0] is not None:
             return sub
@@ -1151,7 +1222,11 @@ def _returns_inert_instance(
         # direct class construction, so ``_return_expr_class`` misses it. Resolve it through the sibling
         # method's factory chain to the built class, then check that class's inertness.
         built, _ = _sibling_method_factory_receiver(
-            expr, enclosing_class, sources, classes, cls_name=cls_name
+            expr,
+            enclosing_class,
+            sources,
+            classes,
+            receiver_names=_receiver_names(fn, cls_name),
         )
         if built is not None:
             cls = built

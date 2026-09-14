@@ -6,7 +6,9 @@
       "name": "Full anatomy rescan",
       "schedule": "0 */6 * * *",
       "description": "Re-scans project filesystem and reconciles anatomy.md",
-      "action": { "type": "scan_project" },
+      "action": {
+        "type": "scan_project"
+      },
       "retry": {
         "max_attempts": 3,
         "backoff": "exponential",
@@ -26,7 +28,9 @@
       "description": "Compress memory.md entries older than 7 days",
       "action": {
         "type": "consolidate_memory",
-        "params": { "older_than_days": 7 }
+        "params": {
+          "older_than_days": 7
+        }
       },
       "retry": {
         "max_attempts": 2,
@@ -46,7 +50,9 @@
       "description": "Transfer short-term hippocampus events to long-term neocortex memory",
       "action": {
         "type": "consolidate_hippocampus",
-        "params": { "max_to_promote": 50 }
+        "params": {
+          "max_to_promote": 50
+        }
       },
       "retry": {
         "max_attempts": 2,
@@ -64,13 +70,18 @@
       "name": "Token audit report",
       "schedule": "0 0 * * 1",
       "description": "Weekly waste pattern detection",
-      "action": { "type": "generate_token_report" },
+      "action": {
+        "type": "generate_token_report"
+      },
       "retry": {
         "max_attempts": 2,
         "backoff": "linear",
         "base_delay_seconds": 60
       },
-      "failsafe": { "on_failure": "log_and_continue", "dead_letter": true },
+      "failsafe": {
+        "on_failure": "log_and_continue",
+        "dead_letter": true
+      },
       "enabled": true
     },
     {
@@ -82,7 +93,9 @@
         "type": "ai_task",
         "params": {
           "prompt": "Review this cerebrum.md. Remove duplicate preferences (keep newer). Remove Do-Not-Repeat entries older than 90 days if no longer relevant. Consolidate Key Learnings that overlap. Keep the file under 2000 tokens. Return the cleaned file content only.",
-          "context_files": [".wolf/cerebrum.md"]
+          "context_files": [
+            ".wolf/cerebrum.md"
+          ]
         }
       },
       "retry": {
@@ -90,7 +103,10 @@
         "backoff": "none",
         "base_delay_seconds": 0
       },
-      "failsafe": { "on_failure": "log_and_continue", "dead_letter": false },
+      "failsafe": {
+        "on_failure": "log_and_continue",
+        "dead_letter": false
+      },
       "enabled": true
     },
     {
@@ -102,7 +118,10 @@
         "type": "ai_task",
         "params": {
           "prompt": "Based on the recent memory entries and current project structure, provide: 1) Key achievements this week, 2) Code improvements to consider, 3) Logical next tasks, 4) Technical debt or risks. Be specific and actionable. Return as JSON: {achievements:[], improvements:[], next_tasks:[], risks:[]}",
-          "context_files": [".wolf/memory.md", ".wolf/anatomy.md"]
+          "context_files": [
+            ".wolf/memory.md",
+            ".wolf/anatomy.md"
+          ]
         }
       },
       "retry": {
@@ -110,7 +129,44 @@
         "backoff": "none",
         "base_delay_seconds": 0
       },
-      "failsafe": { "on_failure": "log_and_continue", "dead_letter": false },
+      "failsafe": {
+        "on_failure": "log_and_continue",
+        "dead_letter": false
+      },
+      "enabled": true
+    },
+    {
+      "id": "score-run",
+      "name": "Taste score update",
+      "schedule": "*/5 * * * *",
+      "description": "compute taste_score compete --constitution every 5 min (auto score, no manual run)",
+      "action": {
+        "type": "run_command",
+        "params": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "taste_score",
+            "compete",
+            "--constitution",
+            "src/taste_score/constitution.toml",
+            "--out",
+            "src/taste_score/ledger.json"
+          ],
+          "env": {
+            "PYTHONPATH": "src"
+          }
+        }
+      },
+      "retry": {
+        "max_attempts": 2,
+        "backoff": "exponential",
+        "base_delay_seconds": 5
+      },
+      "failsafe": {
+        "on_failure": "continue",
+        "dead_letter": true
+      },
       "enabled": true
     }
   ]
