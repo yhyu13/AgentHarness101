@@ -108,6 +108,11 @@ class Goal:
             # Capture completion evidence; field reused to keep schema simple.
             self.last_blocked_reason = reason
             self.blocked_count = 0
+        elif new_status == GoalStatus.PAUSED:
+            # A pause is a human checkpoint: the operator needs the reason, so unlike
+            # the other non-blocked transitions this one keeps it.
+            self.blocked_count = 0
+            self.last_blocked_reason = reason
         else:
             # Reset blocked counter when leaving blocked state.
             self.blocked_count = 0

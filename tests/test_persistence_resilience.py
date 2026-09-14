@@ -245,3 +245,16 @@ def test_apply_usage_takes_the_write_lock_before_it_reads(tmp_path: Path) -> Non
     began = next(i for i, sql in enumerate(statements) if sql.startswith("BEGIN IMMEDIATE"))
     updated = next(i for i, sql in enumerate(statements) if sql.startswith("UPDATE"))
     assert began < updated, f"the write lock must precede the UPDATE; saw {statements}"
+
+
+def test_pause_records_the_reason_for_the_operator(runtime: GoalRuntime) -> None:
+    """PAUSED is a human checkpoint, not a terminal state — the whole point is that
+    an operator later reads WHY it stopped. The reason was falling into the generic
+    else-branch and being reset to None, both in memory and on disk."""
+    runtime.create_goal("t1", "objective")
+
+    goal = runtime.pause("t1", "needs human review")
+
+    assert goal.status == GoalStatus.PAUSED
+    assert goal.last_blocked_reason == "needs human review"
+    assert runtime.get_goal("t1").last_blocked_reason == "needs human review"
