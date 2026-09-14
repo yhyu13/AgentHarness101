@@ -255,8 +255,12 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     classmethod receiver. This fire a classmethod factory whose return class is reachable only through a
     SIBLING classmethod DELEGATED VIA THE ``cls`` receiver (``create()`` doing ``return cls.build()``) is
     CAUGHT too — the delegation look now follows an attribute call on the ``cls`` receiver. The honest
-    residual headroom moved one step deeper to ``nested-clsattr-delegation-hidden`` (a TWO-HOP
-    ``cls``-receiver chain, ``create()`` returning ``cls._mid()`` which returns ``cls.build()``). Each
+    residual headroom moved through ``nested-clsattr-delegation-hidden`` (a TWO-HOP ``cls``-receiver
+    chain, ``create()`` returning ``cls._mid()`` which returns ``cls.build()``), which is now CAUGHT
+    too — the receiver name is re-derived at every sibling hop. The honest residual headroom moved one
+    step deeper to ``cls-arg-delegation-hidden`` (the classmethod HANDS its ``cls`` receiver to a
+    module-level helper, ``create()`` returning ``_delegate(cls)``): an argument passed into a free
+    function is not tracked as the class receiver, so the base builder is never reached. Each
     caught cheat level reveals a subtler still-unsolved one, so
     verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
     for p in _constitution().principles:
@@ -441,10 +445,22 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(nested_clsattr.text)  # valid Python
         run_nca = TraceabilityVerifier.classify(p.pattern, p.violations, nested_clsattr.text, p.id)
-        assert run_nca.did_expand is True, (
+        assert run_nca.did_expand is False, (
             f"{p.id} nested-clsattr-delegation-hidden fake (a TWO-HOP ``cls``-receiver delegation, "
-            f"``create()`` returning ``cls._mid()`` which returns ``cls.build()``) is the new honest "
-            f"residual headroom and must still bless"
+            f"``create()`` returning ``cls._mid()`` which returns ``cls.build()``) must now be rejected — "
+            f"the receiver name is re-derived at every sibling hop, so the chain reaches the base builder "
+            f"that binds the constant"
+        )
+        cls_arg = next(c for c in mutant_cases(p) if c.label == "cls-arg-delegation-hidden")
+        assert re.search(p.pattern, cls_arg.text), (
+            f"{p.id} cls-arg-delegation-hidden fake must carry the pattern, got {cls_arg.text!r}"
+        )
+        ast.parse(cls_arg.text)  # valid Python
+        run_ca = TraceabilityVerifier.classify(p.pattern, p.violations, cls_arg.text, p.id)
+        assert run_ca.did_expand is True, (
+            f"{p.id} cls-arg-delegation-hidden fake (the classmethod HANDS its ``cls`` receiver to a "
+            f"module-level helper that does the building, ``create()`` returning ``_delegate(cls)``) is "
+            f"the new honest residual headroom and must still bless"
         )
 
 
@@ -1115,13 +1131,13 @@ def test_two_hop_sibling_delegation_chain_is_rejected() -> None:
     assert run.safe is True
 
 
-def test_nested_clsattr_delegation_residual_is_headroom() -> None:
-    """The ratchet: once ``factory-clsattr-delegation-hidden`` is caught, the honest residual moves one step
-    deeper to a TWO-HOP ``cls``-receiver delegation (``_make().create().val`` where ``create`` does
-    ``return cls._mid()`` and ``_mid`` does ``return cls.build()``). The resolver follows one attribute call
-    on the ``cls`` receiver, not a chain of them, so the base builder is never reached, the read is not
-    proven a constant and the guard still blesses. Carries the pattern, valid Python — this is what keeps
-    verifier_strength honestly < 1.0."""
+def test_nested_clsattr_delegation_constant_is_now_rejected() -> None:
+    """A constant reached through a TWO-HOP ``cls``-receiver delegation (``_make().create().val`` where
+    ``create`` does ``return cls._mid()`` and ``_mid`` does ``return cls.build()``) is an inert
+    pass-through: always the same constant, never inspects its inputs. The sibling-delegation look now
+    re-derives the receiver name at EVERY hop (a ``@classmethod`` names its receiver with its own first
+    arg), so the chain reaches the base builder that binds the constant and the guard is refused. This
+    closes the previous residual headroom (``nested-clsattr-delegation-hidden``)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -1146,8 +1162,79 @@ def test_nested_clsattr_delegation_residual_is_headroom() -> None:
     ast.parse(guard)
     assert re.search(p.pattern, guard), "carries the pattern"
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "a two-hop cls-receiver delegation must now be rejected — the receiver name is re-derived at "
+        "every sibling hop, so the chain reaches the base builder that binds the constant"
+    )
+    assert run.safe is True
+
+
+def test_cls_arg_delegation_residual_is_headroom() -> None:
+    """The ratchet: once the TWO-HOP ``cls``-receiver chain is followed, the honest residual moves one step
+    deeper to a classmethod that HANDS its ``cls`` receiver to a MODULE-LEVEL HELPER which does the
+    building (``create()`` does ``return _delegate(cls)``; ``_delegate`` does ``return k.build()``). The
+    resolver re-derives the receiver name per sibling hop, but an argument passed INTO a free function is
+    not tracked as the class receiver, so the base builder is never reached, the read is not proven a
+    constant and the guard still blesses. Carries the pattern, valid Python — this is what keeps
+    verifier_strength honestly < 1.0."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return _delegate(cls)\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    assert re.search(p.pattern, guard), "carries the pattern"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
     assert run.did_expand is True, (
-        "a two-hop cls-receiver delegation is the new honest residual and must still bless"
+        "a cls receiver handed to a module-level helper is the new honest residual and must still bless"
+    )
+    assert run.safe is True
+
+
+def test_two_hop_cls_chain_that_decides_is_still_blessed() -> None:
+    """Anti-over-rejection for the receiver-chain threading: a TWO-HOP ``cls``-receiver delegation whose
+    base builder constructs a guard that GENUINELY DECIDES on state is a real decision, not a
+    pass-through. The resolver now reaches the base builder, but that class carries a state-deciding
+    member, so it is not inert and the guard stays blessed. Guards against the receiver threading
+    flipping a real guard into a rejected inert shell."""
+    p = _constitution().principles[0]  # SEC-01 'allows_write|_is_within|allow_roots'
+    guard = (
+        "class _Guard:\n"
+        "    _allowed_roots = ('/a', '/b')\n"
+        "    def allows_write(self, path):\n"
+        "        return path in self._allowed_roots\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        return cls()\n"
+        "    @classmethod\n"
+        "    def _mid(cls):\n"
+        "        return cls.build()\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return cls._mid()\n"
+        "def _make():\n"
+        "    return _Guard()\n"
+        "def allows_write(self, path):\n"
+        "    return _make().create().allows_write(path)\n"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a two-hop cls-receiver chain whose built guard decides on state must stay a real guard"
     )
     assert run.safe is True
 

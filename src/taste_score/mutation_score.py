@@ -49,8 +49,12 @@ classmethod→classmethod delegation resolver now follows an attribute call on t
 a bare-Name sibling call, so ``factory-clsattr-delegation-hidden`` is rejected. The current residual headroom
 moved one ratchet step deeper to ``nested-clsattr-delegation-hidden``: a constant reached through a classmethod
 factory whose ``cls``-receiver delegation is TWO hops deep (``create`` does ``return cls._mid()`` and ``_mid``
-does ``return cls.build()``) — the resolver follows ONE attribute call on the ``cls`` receiver, not a chain of
-them, so the base builder that binds the constant is never reached and the read is not proven a constant. Each
+does ``return cls.build()``), and — this fire — the resolver re-derives the receiver name at EVERY sibling hop
+(a ``@classmethod`` names its receiver with its own first arg), so that chain is now followed to the base builder
+and CAUGHT. The residual moved one ratchet step deeper again to ``cls-arg-delegation-hidden``: the classmethod
+HANDS its ``cls`` receiver to a module-level helper (``create`` does ``return _delegate(cls)``, ``_delegate``
+does ``return k.build()``) — an argument passed into a free function is not tracked as the class receiver, so
+the base builder is never reached and the read is not proven a constant. Each
 ratchet step is: catch this level, add a subtler one.
 
 This fire adds a second, orthogonal axis to the corpus: WHERE the guard's name survives, not how the
@@ -946,6 +950,80 @@ def _nested_clsattr_delegation_hidden(token: str) -> str:
     )
 
 
+def _cls_arg_delegation_hidden(token: str) -> str:
+    """A pass-through whose constant is read on an instance reached through a classmethod factory that
+    HANDS ITS ``cls`` RECEIVER TO A MODULE-LEVEL HELPER which does the building (``_make().create().val``
+    — ``create`` does ``return _delegate(cls)`` and ``_delegate`` does ``return k.build()``). Once the
+    resolver re-derives the receiver name at every sibling hop of a ``cls``-receiver chain, the next
+    honest headroom is a receiver that LEAVES the class: an argument passed into a free function is not
+    tracked as the class receiver, so the base builder is never reached, the read is not proven a constant
+    and the guard stays a real decision. The 'add a subtler mutant' ratchet once
+    ``nested-clsattr-delegation-hidden`` is caught."""
+    sym = _guard_symbol(token)
+    if not sym:
+        literal = token.replace("\\", "")
+        return (
+            "class _Helper:\n"
+            "    def _setup(self):\n"
+            "        self.val = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return _delegate(cls)\n"
+            "def _delegate(k):\n"
+            "    return k.build()\n"
+            "def _make():\n"
+            "    return _Helper()\n"
+            "def _guard():\n"
+            "    if " + literal + ":\n"
+            "        return True\n"
+            "    return _make().create().val\n"
+        )
+    if token.strip().startswith("class"):
+        return (
+            f"class {sym}:\n"
+            "    def _setup(self):\n"
+            "        self._ALWAYS = True\n"
+            "    @classmethod\n"
+            "    def build(cls):\n"
+            "        h = cls()\n"
+            "        h._setup()\n"
+            "        return h\n"
+            "    @classmethod\n"
+            "    def create(cls):\n"
+            "        return _delegate(cls)\n"
+            "    def check(self, action):\n"
+            "        return _make().create()._ALWAYS\n"
+            "def _delegate(k):\n"
+            "    return k.build()\n"
+            "def _make():\n"
+            f"    return {sym}()\n"
+        )
+    return (
+        "class _Helper:\n"
+        "    def _setup(self):\n"
+        "        self.val = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return _delegate(cls)\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return _Helper()\n"
+        f"def {sym}(*args, **kwargs):\n"
+        "    return _make().create().val\n"
+    )
+
+
 def _prose_comment_hidden(token: str) -> str:
     """The guard DELETED from the code and left behind as a COMMENT.
 
@@ -1119,6 +1197,16 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase(
             "nested-clsattr-delegation-hidden",
             _nested_clsattr_delegation_hidden(tok),
+            False,
+        ),
+        # A pass-through whose constant is read on an instance reached through a CLASSMETHOD factory that
+        # HANDS ITS ``cls`` RECEIVER TO A MODULE-LEVEL HELPER which does the building (_make().create().val
+        # where create does ``return _delegate(cls)`` and _delegate does ``return k.build()``) — now CAUGHT:
+        # the receiver name is re-derived at every sibling hop of a ``cls``-receiver chain, so a two-hop
+        # chain reaches the base builder that binds the constant.
+        MutantCase(
+            "cls-arg-delegation-hidden",
+            _cls_arg_delegation_hidden(tok),
             False,
         ),
         # The guard deleted from the code, its name left behind as a COMMENT in a module that

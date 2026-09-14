@@ -446,11 +446,13 @@ def _sibling_method_factory_receiver(
     a delegation chain) to reach the BASE builder that directly constructs the class — the mutator that binds
     the constant lives in that base builder's body, not in the delegating wrapper. ``cls_name`` is the
     first-arg receiver name of the ``@classmethod`` whose return expr is being resolved (``cls`` in ``return
-    cls.build()``): an attribute call on that name targets ``class_def`` itself. Only ONE such hop is followed
-    (the nested recursion passes no ``cls_name``), so a two-hop cls-receiver chain stays un-resolved
-    headroom. ``_depth`` caps mutual method-factory recursion (``a()`` returning ``b()`` returning ``a()``
-    cannot hang the detector). Returns ``(None, None)`` when the call is neither shape, the named method is
-    not a method of ``class_def``, or the sibling is not a resolvable factory."""
+    cls.build()``): an attribute call on that name targets ``class_def`` itself. The receiver name is
+    RE-DERIVED at every hop (the sibling ``@classmethod``'s own first arg, falling back to the inherited
+    name), so a chain of ``cls``-receiver delegations (``create`` -> ``cls._mid()`` -> ``cls.build()``) is
+    followed to the base builder rather than stopping after one hop. ``_depth`` caps mutual method-factory
+    recursion (``a()`` returning ``b()`` returning ``a()`` cannot hang the detector). Returns
+    ``(None, None)`` when the call is neither shape, the named method is not a method of ``class_def``, or
+    the sibling is not a resolvable factory."""
     if _depth > 8:
         return None, None
     if not isinstance(value, ast.Call):
@@ -471,10 +473,18 @@ def _sibling_method_factory_receiver(
     method = _find_method(class_def, method_name)
     if method is None:
         return None, None
+    # The receiver name of THIS sibling hop: a ``@classmethod`` names its own receiver with its first arg
+    # (``cls``), which is the name an attribute delegation inside its body targets. Inherit the caller's
+    # name when the sibling is not a classmethod, so a ``cls``-receiver chain keeps resolving at each hop.
+    inner_cls_name = cls_name
+    if _is_classmethod(method) and method.args.args:
+        inner_cls_name = method.args.args[0].arg
     for r in _collect_returns_of(method):
         sub = _factory_receiver(r.value, sources, classes, _depth + 1)
         if sub[0] is None:
-            sub = _sibling_method_factory_receiver(r.value, class_def, sources, classes, _depth + 1)
+            sub = _sibling_method_factory_receiver(
+                r.value, class_def, sources, classes, _depth + 1, inner_cls_name
+            )
         if sub[0] is not None:
             return sub
     # Not a delegation; the sibling method directly constructs the class (or is not a resolvable factory).
