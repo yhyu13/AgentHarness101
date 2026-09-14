@@ -20,6 +20,7 @@ from taste_score.gate import TasteGate
 from taste_score.models import Probe, ProbeRun
 from taste_score.mutator import Mutator
 from taste_score.mutation_score import verifier_strength
+from taste_score.pin import read_pin
 from taste_score.source import build_initial_probes
 from taste_score.trace import TraceabilityVerifier
 
@@ -116,6 +117,7 @@ def compete(
     seed: int,
     out: str,
     constitution: object | None = None,
+    pin: str | None = None,
 ) -> int:
     golden = build_initial_probes(constitution=constitution)
     mutator = Mutator()
@@ -125,7 +127,9 @@ def compete(
     # Gate uses the constitution where it has evidence, else the hostile-honest demo
     # verify; the ledger reads the verifier's matrix/compliance directly.
     gate_verify = make_demo_aware_verify(verify) if verify is not None else None
-    pinned = constitution.digest() if constitution is not None else None
+    # The pin must come from outside this process (env / checked-in constant), never
+    # from the constitution being graded — otherwise the comparison is a tautology.
+    pinned = pin if pin is not None else read_pin()
     for night in range(nights):
         nseed = seed + night
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
@@ -182,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="path to a constitution.toml; pins it as the ruler and enables traceability verify",
     )
+    comp.add_argument(
+        "--pin",
+        default=None,
+        help="expected constitution digest held outside the repo; "
+             "defaults to AH_CONSTITUTION_PIN or constitution.pin",
+    )
     comp.set_defaults(fn=compete)
 
     args = parser.parse_args(argv)
@@ -189,7 +199,10 @@ def main(argv: list[str] | None = None) -> int:
         from taste_score.constitution import load_constitution
 
         constitution = load_constitution(Path(args.constitution))
-        code = args.fn(args.nights, args.mutants, args.seed, args.out, constitution=constitution)
+        code = args.fn(
+            args.nights, args.mutants, args.seed, args.out,
+            constitution=constitution, pin=args.pin,
+        )
     else:
         code = args.fn(args.nights, args.mutants, args.seed, args.out)
     print(f"wrote nightly taste-score ledger to {args.out}")

@@ -58,3 +58,52 @@ def test_rank_scores_normally_when_the_ruler_matches_the_pin(tmp_path: Path) -> 
 
     reasons = {r["agent"]: r["reason"] for r in result["ranking"] if r["rejected"]}
     assert "constitution integrity violation (ruler tampered)" not in reasons.values()
+
+
+def test_read_pin_prefers_the_environment(tmp_path: Path) -> None:
+    from taste_score.pin import ENV_VAR, read_pin
+
+    pin_file = tmp_path / "constitution.pin"
+    pin_file.write_text("from-file\n", encoding="utf-8")
+
+    assert read_pin(path=pin_file, env={}) == "from-file"
+    assert read_pin(path=pin_file, env={ENV_VAR: "from-env"}) == "from-env"
+
+
+def test_read_pin_is_none_when_unpinned(tmp_path: Path) -> None:
+    from taste_score.pin import read_pin
+
+    assert read_pin(path=tmp_path / "missing.pin", env={}) is None
+
+
+def test_shipped_pin_matches_shipped_constitution() -> None:
+    """The repo's pin must describe the repo's constitution.
+
+    Without this, a stale pin would veto every agent on a real run, and the
+    obvious "fix" — regenerate the pin — is exactly how a tamper gets laundered.
+    """
+    from taste_score.pin import PIN_PATH, read_pin
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    assert read_pin(path=PIN_PATH, env={}) == real.digest()
+
+
+def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) -> None:
+    """End-to-end: a weakened constitution cannot be scored, even by the CLI path."""
+    import json
+
+    from taste_score.__main__ import compete
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    tampered = load_constitution(_tampered(tmp_path))
+    out = tmp_path / "ledger.json"
+
+    compete(nights=1, mutants_n=1, seed=1, out=str(out), constitution=tampered,
+            pin=real.digest())
+
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    ranking = ledger["nights"][0]["ranking"]
+    assert ranking, "ledger must still record every agent"
+    for row in ranking:
+        assert row["rejected"] is True
+        assert row["reason"] == "constitution integrity violation (ruler tampered)"
