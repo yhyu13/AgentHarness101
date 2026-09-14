@@ -79,6 +79,9 @@ def test_harness_layers_demo_runs_from_clean_cwd(tmp_path: Path) -> None:
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        # Deliberately no encoding=: this child is a Python process, so it encodes its
+        # stdout with the locale codec (cp936 here) and forcing utf-8 breaks the decode.
+        # Only children that always emit utf-8 regardless of locale (git) need pinning.
         timeout=120,
     )
     assert proc.returncode == 0, f"demo failed:\n{proc.stdout}\n{proc.stderr}"

@@ -169,6 +169,9 @@ def test_every_anchor_resolves_to_a_tracked_git_file() -> None:
         ["git", "-C", str(ROOT), "ls-files"],
         capture_output=True,
         text=True,
+        # Same locale trap as _constitution_at_git_head: a non-ASCII path would decode
+        # with cp936 and silently turn stdout into None.
+        encoding="utf-8",
     )
     if repo.returncode != 0:
         import pytest
@@ -512,6 +515,10 @@ def _constitution_at_git_head() -> Constitution | None:
         ["git", "-C", str(ROOT), "show", "HEAD:src/taste_score/constitution.toml"],
         capture_output=True,
         text=True,
+        # git emits the constitution's UTF-8 comments verbatim; without an explicit
+        # encoding Python decodes them with the locale codec (cp936 here), the decode
+        # fails, and stdout comes back as None instead of raising.
+        encoding="utf-8",
     )
     if blob.returncode != 0:
         return None
