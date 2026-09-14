@@ -765,3 +765,52 @@ def test_every_principle_evidence_is_code_backed_not_prose() -> None:
         assert re.search(p.pattern, code), f"{p.id} pattern is satisfied by prose only"
         for req in p.require:
             assert re.search(req, code), f"{p.id} require is satisfied by prose only: {req}"
+
+
+def test_every_principle_evidence_is_code_backed_not_data() -> None:
+    """Authoring ratchet for the DATA half of the evidence rule (``trace._data_spans``).
+
+    ``test_every_principle_evidence_is_code_backed_not_prose`` closed the prose container: a
+    deleted guard whose name survives in a comment or docstring no longer counts. An ordinary
+    string literal is the other container the code view keeps ON PURPOSE (a real ``require`` may
+    contain one, e.g. SEC-02's ``risk == "high"``), so the fix there is containment: evidence
+    must be found outside every literal, but a match merely SPANNING one is still code. A future
+    principle whose evidence lives only inside a literal fails here instead of quietly riding at
+    csdd = 1.0.
+    """
+    from taste_score.trace import _code_only, _data_spans, _evidence
+
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    for p in c.principles:
+        text = (ROOT / p.anchor).read_text(encoding="utf-8")
+        code = _code_only(text)
+        data = _data_spans(text)
+        assert _evidence(p.pattern, code, data), f"{p.id} pattern is satisfied by data only"
+        for req in p.require:
+            assert _evidence(req, code, data), f"{p.id} require is satisfied by data only: {req}"
+
+
+def test_verifier_calls_a_string_literal_only_guard_unimplemented(tmp_path: Path) -> None:
+    """End-to-end through the engine's own ``matrix()``: a name parked in a string implements nothing.
+
+    The same cheater as the prose tests, container #2: the file keeps real logic (so the dead-stub
+    and inert rules stay silent) and the raw regex still matches the guard's name — inside a
+    string literal. The ruler used to call that an expansion; anchoring SEC-01 at such a file must
+    now report ``expanded=False``, with the raw regex still matching so the rejection is
+    attributable to the containment rule rather than to the name being absent.
+    """
+    from dataclasses import replace
+
+    from taste_score.constitution import Constitution as C
+    from taste_score.trace import TraceabilityVerifier
+
+    shipped = load_constitution(DEFAULT_CONSTITUTION)
+    princ = next(p for p in shipped.principles if p.id == "SEC-01")
+    stub_text = 'def _guard(p, roots):\n    _note = "allows_write"\n    return p in roots\n'
+    assert re.search(princ.pattern, stub_text), "the raw regex must still see the name"
+    stub = tmp_path / "path_policy_string_only.py"
+    stub.write_text(stub_text, encoding="utf-8")
+    rows = TraceabilityVerifier(
+        C(version=shipped.version, principles=(replace(princ, anchor=str(stub)),))
+    ).matrix()
+    assert rows[0]["expanded"] is False, "a name parked in a string is not an implementation"

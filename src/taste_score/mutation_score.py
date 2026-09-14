@@ -62,10 +62,13 @@ constant it returns is hidden. ``prose-comment`` / ``prose-docstring`` are the c
 guard and leaves its name behind in a comment or a docstring: the module keeps real logic (so the
 dead-stub rule does not fire) and a regex over raw text still matches — which is exactly how the
 raw-text ruler credited an expansion that was not in the code. Both are now CAUGHT, because evidence
-is read from the code-only view (``trace._code_only`` blanks comments and docstrings). The residual
-moves to ``string-hidden``: the name inside an ORDINARY string literal, which the code view keeps on
-purpose (a real ``require`` may contain one, e.g. SEC-02's ``risk == "high"``), so it is honestly
-still blessed.
+is read from the code-only view (``trace._code_only`` blanks comments and docstrings). ``string-hidden`` is
+the same cheater in the other non-code container: the name inside an ORDINARY string literal, which the
+code view keeps on purpose (a real ``require`` may contain one, e.g. SEC-02's ``risk == "high"``). So the
+rule has to be CONTAINMENT, not "no strings" (``trace._data_spans``: wholly inside a literal = data;
+merely spanning one = still code), and with that rule the string container is CAUGHT too. The residual
+moves one container further out to ``fstring-hidden``: an f-string's literal runs tokenize as
+``FSTRING_MIDDLE``, not ``STRING``, so they sit outside the data spans and the fake is honestly blessed.
 
 The fake generator must emit ONLY valid Python: a fake like ``class class Guard: pass`` is a
 MEASUREMENT BUG, because the verifier's parse-error fallback then blesses an impossible fake
@@ -1051,15 +1054,28 @@ def _prose_docstring_hidden(token: str) -> str:
 
 
 def _string_hidden(token: str) -> str:
-    """The residual of the code-only rule: the name survives inside an ORDINARY STRING LITERAL.
+    """The name survives inside an ORDINARY STRING LITERAL — delete the guard, keep its name as DATA.
 
-    A string is part of a statement, not prose — and the code view deliberately keeps ordinary
-    strings, because real ``require`` properties contain them (SEC-02's ``risk == "high"``). So
-    this guard is still blessed: the honest headroom of the rule, and the 'add a subtler mutant'
-    ratchet once the two prose flavours are caught.
+    A string is part of a statement, not prose, and the code view keeps ordinary strings because
+    real ``require`` properties contain them (SEC-02's ``risk == "high"``) — so blanking them is not
+    an option. The fix is CONTAINMENT: a match lying WHOLLY inside a literal is data, so the name
+    parked in this string is not an implementation. Now CAUGHT (`_data_spans`), for the right reason
+    (the raw regex still matches and the shape rules stay silent — see the corpus test).
     """
     literal = token.replace("\\", "").replace('"', "").replace("'", "")
     return f'def _guard(p):\n    _note = "{literal}"\n    return p in _allowed_roots\n'
+
+
+def _fstring_hidden(token: str) -> str:
+    """The residual of the data rule: the name survives inside an F-STRING's literal text.
+
+    An f-string's literal runs tokenize as ``FSTRING_MIDDLE``, not ``STRING``, so they fall outside
+    ``trace._data_spans`` and the raw regex still finds the name in the code view: the guard is still
+    blessed. That is the named next ratchet step (extend the data spans to the f-string family), not
+    a silent hole — the same 'catch this level, add a subtler one' discipline as the constant chain.
+    """
+    literal = token.replace("\\", "").replace('"', "").replace("'", "")
+    return f'def _guard(p):\n    _note = f"{literal} is enforced"\n    return p in _allowed_roots\n'
 
 
 def _constant_hidden(token: str) -> str:
@@ -1217,9 +1233,14 @@ def mutant_cases(principle: Principle) -> list[MutantCase]:
         MutantCase("prose-docstring", _prose_docstring_hidden(tok), False),
         # The name survives inside an ordinary STRING LITERAL. A string is part of a statement, not
         # prose, and the code view keeps ordinary strings on purpose (real `require` properties
-        # contain them), so this one is still blessed: the honest residual of the code-only rule,
-        # and the 'add a subtler mutant' ratchet once the prose flavours are caught.
+        # contain them) — so the rule is CONTAINMENT: a match lying WHOLLY inside a literal is data,
+        # not an implementation. Now CAUGHT (`_data_spans`).
         MutantCase("string-hidden", _string_hidden(tok), False),
+        # Same cheater, container #3: the name survives inside an F-STRING's literal text. F-string
+        # literal runs tokenize as FSTRING_MIDDLE, not STRING, so they sit outside the data spans and
+        # this fake is still blessed: the honest residual of the data rule, and the next ratchet step
+        # (extend the data spans to the f-string family).
+        MutantCase("fstring-hidden", _fstring_hidden(tok), False),
     ]
 
 

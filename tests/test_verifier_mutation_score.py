@@ -1376,18 +1376,21 @@ def test_classify_still_honours_a_require_that_contains_a_string_literal() -> No
     assert run2.safe is False, "the required property survives only as a comment"
 
 
-def test_prose_only_fakes_model_the_cheater_that_deletes_the_guard() -> None:
-    """The corpus must carry the prose family, and pin WHY each fake is rejected.
+def test_non_code_fakes_model_the_cheater_that_deletes_the_guard() -> None:
+    """The corpus must carry every non-code container, and pin WHY each fake is rejected.
 
-    For the two rejected flavours the raw regex still matches the guard's name and the module is
-    neither a shell nor an inert pass-through — so the only thing that can reject them is the
-    code-only evidence rule (not the dead-stub rule, not the inert rule: rejecting for the wrong
-    reason would deflate the measure instead of measuring it). The string-literal flavour is the
-    named, still-blessed residual of that rule — a string is part of a statement, not prose.
+    For each rejected flavour the raw regex still matches the guard's name and the module is
+    neither a shell nor an inert pass-through — so the only thing that can reject it is the
+    evidence rule (not the dead-stub rule, not the inert rule: rejecting for the wrong reason
+    would deflate the measure instead of measuring it). Two containers are caught: PROSE (a
+    comment / a docstring, blanked by ``_code_only``) and DATA (an ordinary string literal,
+    kept by the code view on purpose, so the check is containment: a match that lies WHOLLY
+    inside a literal is not an implementation). The f-string flavour is the named, still-
+    blessed residual: its literal runs are ``FSTRING_MIDDLE`` tokens, not ``STRING``.
     """
     p = _constitution().principles[0]  # SEC-01
     cases = {c.label: c for c in mutant_cases(p)}
-    for label in ("prose-comment", "prose-docstring"):
+    for label in ("prose-comment", "prose-docstring", "string-hidden"):
         case = cases[label]
         ast.parse(case.text)
         assert case.expected_genuine is False
@@ -1395,10 +1398,43 @@ def test_prose_only_fakes_model_the_cheater_that_deletes_the_guard() -> None:
         assert not _is_dead_stub(case.text), f"{label}: not a shell"
         assert not _is_inert_module(case.text), f"{label}: not an inert pass-through"
         run = TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
-        assert run.did_expand is False, f"{label}: prose is not code"
-    residual = cases["string-hidden"]
+        assert run.did_expand is False, f"{label}: a name that is not code is not an implementation"
+    residual = cases["fstring-hidden"]
     ast.parse(residual.text)
     assert re.search(p.pattern, residual.text)
     assert not _is_dead_stub(residual.text) and not _is_inert_module(residual.text)
     run = TraceabilityVerifier.classify(p.pattern, p.violations, residual.text, p.id)
-    assert run.did_expand is True, "the string-literal flavour stays the honest residual"
+    assert run.did_expand is True, "the f-string flavour stays the honest residual"
+
+
+def test_string_literal_evidence_is_rejected_for_every_principle() -> None:
+    """The data rule is measured across the whole constitution, not on one convenient principle.
+
+    For every principle the ``string-hidden`` fake keeps the guard's name in an ordinary string
+    literal next to real code: the raw regex still sees it in the code view, neither shape rule
+    fires, and only the containment check can refuse the blessing. Measured per principle so a
+    rule that quietly only works for SEC-01's token would be visible instead of averaged away.
+    """
+    for p in _constitution().principles:
+        case = next(c for c in mutant_cases(p) if c.label == "string-hidden")
+        ast.parse(case.text)
+        assert re.search(p.pattern, case.text), f"{p.id}: the raw regex must still see the name"
+        assert not _is_dead_stub(case.text), f"{p.id}: not a shell"
+        assert not _is_inert_module(case.text), f"{p.id}: not an inert pass-through"
+        run = TraceabilityVerifier.classify(p.pattern, p.violations, case.text, p.id)
+        assert run.did_expand is False, f"{p.id}: a string literal is data, not an implementation"
+
+
+def test_evidence_next_to_a_string_literal_still_counts_as_code() -> None:
+    """Anti-over-rejection: the rule is CONTAINMENT, never "no strings anywhere".
+
+    SEC-02's real anchor decides against a literal (``if risk == "high" or action in
+    _HIGH_RISK_ACTIONS:``). A match that starts in code and merely runs into the literal is a
+    decision made in code, so it must stay evidence — distrusting every literal would gut the
+    real constitution, which is exactly why the rule is "wholly inside" rather than "touches".
+    """
+    p = _constitution().principles[1]  # SEC-02
+    text = 'if risk == "high" or action in _HIGH_RISK_ACTIONS:\n    return PENDING\n'
+    run = TraceabilityVerifier.classify("_HIGH_RISK_ACTIONS", p.violations, text, p.id, p.require)
+    assert run.did_expand is True
+    assert run.safe is True, "a require that spans a literal is still a code-backed property"

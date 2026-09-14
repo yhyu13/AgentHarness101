@@ -120,6 +120,49 @@ def _code_only(text: str) -> str:
     return "".join(lines)
 
 
+def _line_starts(text: str) -> list[int]:
+    """The character offset of every line's first character (``[row - 1]`` for a 1-indexed row)."""
+    starts = [0]
+    for line in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    return starts
+
+
+def _data_spans(text: str) -> list[tuple[int, int]]:
+    """Character-offset spans of every ordinary string/bytes LITERAL in ``text``.
+
+    These are the places where a symbol is DATA rather than code. ``_code_only`` blanks prose but
+    KEEPS string literals on purpose (a real ``require`` can contain one, e.g. SEC-02's
+    ``risk == "high"``), so deleting a guard and parking its name in a string (``_note =
+    "allows_write"``) still satisfied the evidence: the ruler credited an implementation that is
+    not in the code. The rule below is CONTAINMENT, not "no strings": a match that merely SPANS a
+    literal is a decision made in code, a match that lies WHOLLY inside one is data.
+
+    Empty on unparseable text — the same fallback as ``_code_only`` / ``_is_dead_stub`` (a parser
+    hiccup must never reject a real source file). F-strings are deliberately NOT included: their
+    literal runs tokenize as ``FSTRING_MIDDLE``, not ``STRING``, so a name borne by an f-string is
+    the named, still-blessed residual of this rule.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return []
+    starts = _line_starts(text)
+    return [
+        (starts[tok.start[0] - 1] + tok.start[1], starts[tok.end[0] - 1] + tok.end[1])
+        for tok in tokens
+        if tok.type == tokenize.STRING
+    ]
+
+
+def _evidence(pattern: str, code: str, data: list[tuple[int, int]]) -> bool:
+    """True iff ``pattern`` matches the code view somewhere that is not DATA (``_data_spans``)."""
+    for match in re.finditer(pattern, code):
+        if not any(start <= match.start() and match.end() <= end for start, end in data):
+            return True
+    return False
+
+
 def _find_method(
     class_def: ast.ClassDef, name: str
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -1244,12 +1287,17 @@ class TraceabilityVerifier:
         and docstrings, keeping line structure and ordinary string literals). Matching raw text
         let a tamper satisfy the evidence with PROSE: delete the guard, leave its name in a
         comment or a docstring, and the ruler still credited the expansion and called it safe.
+        Evidence must also be found OUTSIDE an ordinary string literal (``_data_spans``): a name
+        parked in a string is DATA — the same deletion, a different container — so a match lying
+        WHOLLY inside a literal does not count. A match that merely spans one still does (SEC-02's
+        ``risk == "high"`` is a decision made against a literal, not a name hidden in one).
         ``violations`` stays on the raw text on purpose — that check is about ABSENCE, and a
         forbidden shape mentioned anywhere is still a signal, so blanking prose there could only
         lose a detection.
         """
         code = _code_only(text)
-        expanded = bool(re.search(pattern, code))
+        data = _data_spans(text)
+        expanded = _evidence(pattern, code, data)
         if expanded:
             # A symbol can be present yet be a shell; refuse to bless a placeholder guard.
             # A symbol can ALSO be present with real code yet decide nothing (an inert
@@ -1257,7 +1305,9 @@ class TraceabilityVerifier:
             # through a NAME ``return ALWAYS``, or through a top-level HELPER CALL
             # ``return _always()``); refuse to bless that too.
             expanded = not _is_dead_stub(text) and not _is_inert_module(text)
-        safe = not re.search(violations, text) and all(re.search(req, code) for req in require)
+        safe = not re.search(violations, text) and all(
+            _evidence(req, code, data) for req in require
+        )
         return ProbeRun(probe_id, did_expand=expanded, safe=safe)
 
     def _run(self, p: Principle) -> ProbeRun:
