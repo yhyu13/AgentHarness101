@@ -492,6 +492,28 @@ def _factory_receiver(
     return None, None
 
 
+def _handed_receiver_param(
+    call: ast.Call,
+    callee: ast.FunctionDef | ast.AsyncFunctionDef,
+    receiver_name: str,
+) -> str | None:
+    """The parameter name that RECEIVES ``receiver_name`` at this call site, or ``None``.
+
+    A ``@classmethod`` can hand its ``cls`` receiver to a MODULE-LEVEL helper
+    (``create()`` returns ``_delegate(cls)``); inside the helper the receiver has the helper's
+    parameter name (``def _delegate(k)`` -> ``return k.build()``), so that name is what a delegation
+    inside the helper must be resolved against. Only a POSITIONAL argument that is LITERALLY the
+    tracked receiver name is bound, and the parameter must be a plain positional parameter: a
+    relabelled hand-off (``k = cls`` then ``_delegate(k)``) or a keyword hand-off is deliberately not
+    tracked, so that residual stays honestly un-resolved instead of being guessed at.
+    """
+    params = [*getattr(callee.args, "posonlyargs", []), *callee.args.args]
+    for index, arg in enumerate(call.args):
+        if isinstance(arg, ast.Name) and arg.id == receiver_name:
+            return params[index].arg if index < len(params) else None
+    return None
+
+
 def _sibling_method_factory_receiver(
     value: ast.AST,
     class_def: ast.ClassDef,
@@ -517,7 +539,10 @@ def _sibling_method_factory_receiver(
     followed to the base builder rather than stopping after one hop. ``_depth`` caps mutual method-factory
     recursion (``a()`` returning ``b()`` returning ``a()`` cannot hang the detector). Returns
     ``(None, None)`` when the call is neither shape, the named method is not a method of ``class_def``, or
-    the sibling is not a resolvable factory."""
+    the sibling is not a resolvable factory. A call to a MODULE-LEVEL HELPER that RECEIVES the tracked
+    receiver as an argument (``create()`` returns ``_delegate(cls)``) is a delegation too: the helper's
+    parameter bound to that argument names the receiver inside the helper, so the helper's own returns
+    are resolved with that parameter as the receiver name and the base builder is still reached."""
     if _depth > 8:
         return None, None
     if not isinstance(value, ast.Call):
@@ -537,6 +562,27 @@ def _sibling_method_factory_receiver(
         return None, None
     method = _find_method(class_def, method_name)
     if method is None:
+        # A delegation that HANDS THE RECEIVER TO A MODULE-LEVEL HELPER (``create()`` returns
+        # ``_delegate(cls)``): the receiver leaves the class as an argument, so the attribute call made
+        # inside the helper (``k.build()``) is not on a name this resolver knows and the delegation used
+        # to stop here — the base builder that binds the constant was never reached and an inert
+        # pass-through was blessed. Bind the helper's parameter that receives the tracked receiver, then
+        # resolve the helper's OWN returns with that parameter as the receiver name, so the chain still
+        # reaches the base builder. Only a module-level function written with the tracked receiver name
+        # is followed (see ``_handed_receiver_param``).
+        if isinstance(value.func, ast.Name) and cls_name is not None and sources:
+            handed = sources.get(value.func.id)
+            if handed is not None:
+                param = _handed_receiver_param(value, handed, cls_name)
+                if param is not None:
+                    for r in _collect_returns_of(handed):
+                        sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+                        if sub[0] is None:
+                            sub = _sibling_method_factory_receiver(
+                                r.value, class_def, sources, classes, _depth + 1, param
+                            )
+                        if sub[0] is not None:
+                            return sub
         return None, None
     # The receiver name of THIS sibling hop: a ``@classmethod`` names its own receiver with its first arg
     # (``cls``), which is the name an attribute delegation inside its body targets. Inherit the caller's
@@ -1201,6 +1247,40 @@ def _collect_returns_of(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.
     return out
 
 
+def _is_receiver_forwarder(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True iff a MODULE-LEVEL function carries no decision of its OWN: every ``return`` is a method
+    call on one of the function's own parameters (``def _delegate(k): return k.build()``).
+
+    A ``@classmethod`` can hand its ``cls`` receiver to such a helper (``create()`` returns
+    ``_delegate(cls)``) instead of building itself. The helper decides nothing: whatever it returns is
+    decided by the RECEIVER's method — and that method is a member of the class the receiver was handed
+    to, in this same module, so it is checked on its own. Counting the helper as logic would let a
+    classmethod that hands ``cls`` to a helper hide an inert pass-through from the module check.
+
+    Narrow on purpose: ONE return that is anything else (a constant, a comparison, a bare-Name call, a
+    bare attribute READ) means the function decides on its own and it is judged by the ordinary
+    inert-function rule instead. A function with no return at all is not a forwarder either.
+    """
+    params = {
+        a.arg for a in (*getattr(fn.args, "posonlyargs", []), *fn.args.args, *fn.args.kwonlyargs)
+    }
+    if fn.args.vararg is not None:
+        params.add(fn.args.vararg.arg)
+    returns = _collect_returns_of(fn)
+    if not returns:
+        return False
+    for r in returns:
+        call = r.value
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id in params
+        ):
+            return False
+    return True
+
+
 def _is_inert_statement(
     stmt: ast.stmt,
     env: dict[str, object],
@@ -1212,8 +1292,11 @@ def _is_inert_statement(
     _visiting: frozenset[str] = frozenset(),
 ) -> bool:
     """True iff a top-level statement carries no effective guard logic: a pass, an import, a
-    module docstring, a constant-only assignment, an inert function, or a class composed only
-    of inert statements. A frame of real logic anywhere makes the module non-inert.
+    module docstring, a constant-only assignment, an inert function, a module-level receiver
+    FORWARDER (a function whose every return is a method call on its own parameter: the decision
+    lives in the receiver's method, checked as a member of the class it was handed to in this
+    module), or a class composed only of inert statements. A frame of real logic anywhere makes
+    the module non-inert.
     ``env`` carries the module-constant names so a constant hidden behind a NAME is traced;
     ``helpers``/``sources`` extend that to a constant hidden behind a HELPER CALL, and
     ``classes``/``current_class`` extend it to a constant hidden behind a BOUND-METHOD CALL."""
@@ -1229,6 +1312,13 @@ def _is_inert_statement(
         )
         return ok
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if current_class is None and _is_receiver_forwarder(stmt):
+            # A module-level RECEIVER FORWARDER (``def _delegate(k): return k.build()``) decides nothing
+            # of its own: its value is decided by the receiver's method, which is checked as a member of
+            # the class the receiver was handed to in this same module. Only module-level functions get
+            # this treatment (a class member is still an ordinary inertness question), and only when
+            # EVERY return forwards.
+            return True
         return _is_inert_function(
             stmt, env, helpers, sources, classes, current_class, _depth=_depth, _visiting=_visiting
         )

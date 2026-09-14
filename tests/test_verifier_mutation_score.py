@@ -257,12 +257,16 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     CAUGHT too — the delegation look now follows an attribute call on the ``cls`` receiver. The honest
     residual headroom moved through ``nested-clsattr-delegation-hidden`` (a TWO-HOP ``cls``-receiver
     chain, ``create()`` returning ``cls._mid()`` which returns ``cls.build()``), which is now CAUGHT
-    too — the receiver name is re-derived at every sibling hop. The honest residual headroom moved one
-    step deeper to ``cls-arg-delegation-hidden`` (the classmethod HANDS its ``cls`` receiver to a
-    module-level helper, ``create()`` returning ``_delegate(cls)``): an argument passed into a free
-    function is not tracked as the class receiver, so the base builder is never reached. Each
-    caught cheat level reveals a subtler still-unsolved one, so
-    verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
+    too — the receiver name is re-derived at every sibling hop. This fire ``cls-arg-delegation-hidden``
+    (the classmethod HANDS its ``cls`` receiver to a module-level helper, ``create()`` returning
+    ``_delegate(cls)``) is CAUGHT as well: the helper's parameter that receives the tracked receiver is
+    bound, and a module-level function whose every return is a method call on its own parameter is
+    transparent (the decision lives in the receiver's method, checked in this same module). The honest
+    residual headroom moved one step deeper to ``cls-alias-delegation-hidden`` (the receiver is RENAMED
+    through a local alias before the hand-off, ``k = cls`` then ``_delegate(k)``): the hand-off no longer
+    names the tracked receiver, so the base builder is never reached. Each caught cheat level reveals a
+    subtler still-unsolved one, so verifier_strength stays honestly < 1.0 — the non-saturation ratchet
+    keeps firing."""
     for p in _constitution().principles:
         partial = next(c for c in mutant_cases(p) if c.label == "partial")
         run_p = TraceabilityVerifier.classify(p.pattern, p.violations, partial.text, p.id)
@@ -457,10 +461,22 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(cls_arg.text)  # valid Python
         run_ca = TraceabilityVerifier.classify(p.pattern, p.violations, cls_arg.text, p.id)
-        assert run_ca.did_expand is True, (
+        assert run_ca.did_expand is False, (
             f"{p.id} cls-arg-delegation-hidden fake (the classmethod HANDS its ``cls`` receiver to a "
-            f"module-level helper that does the building, ``create()`` returning ``_delegate(cls)``) is "
-            f"the new honest residual headroom and must still bless"
+            f"module-level helper that does the building, ``create()`` returning ``_delegate(cls)``) must "
+            f"now be rejected — the helper's parameter bound to the tracked receiver is followed to the "
+            f"base builder that binds the constant"
+        )
+        cls_alias = next(c for c in mutant_cases(p) if c.label == "cls-alias-delegation-hidden")
+        assert re.search(p.pattern, cls_alias.text), (
+            f"{p.id} cls-alias-delegation-hidden fake must carry the pattern, got {cls_alias.text!r}"
+        )
+        ast.parse(cls_alias.text)  # valid Python
+        run_alias = TraceabilityVerifier.classify(p.pattern, p.violations, cls_alias.text, p.id)
+        assert run_alias.did_expand is True, (
+            f"{p.id} cls-alias-delegation-hidden fake (the receiver RENAMED through a local alias before "
+            f"the hand-off, ``k = cls`` then ``_delegate(k)``) is the new honest residual headroom and "
+            f"must still bless"
         )
 
 
@@ -1169,14 +1185,15 @@ def test_nested_clsattr_delegation_constant_is_now_rejected() -> None:
     assert run.safe is True
 
 
-def test_cls_arg_delegation_residual_is_headroom() -> None:
-    """The ratchet: once the TWO-HOP ``cls``-receiver chain is followed, the honest residual moves one step
-    deeper to a classmethod that HANDS its ``cls`` receiver to a MODULE-LEVEL HELPER which does the
-    building (``create()`` does ``return _delegate(cls)``; ``_delegate`` does ``return k.build()``). The
-    resolver re-derives the receiver name per sibling hop, but an argument passed INTO a free function is
-    not tracked as the class receiver, so the base builder is never reached, the read is not proven a
-    constant and the guard still blesses. Carries the pattern, valid Python — this is what keeps
-    verifier_strength honestly < 1.0."""
+def test_cls_arg_delegation_constant_is_now_rejected() -> None:
+    """A cls receiver HANDED TO A MODULE-LEVEL HELPER (``create()`` does ``return _delegate(cls)``;
+    ``_delegate`` does ``return k.build()``) is still an inert pass-through: the same constant every
+    time, nothing inspected. Two things now close it: the delegation look BINDS the helper's parameter
+    that receives the tracked receiver and follows the helper's returns as a receiver delegation, and a
+    module-level function whose EVERY return is a method call on its own parameter is transparent (the
+    decision lives in the receiver's method, which is checked as a member of the class it was handed to
+    in this same module). The base builder is reached, the constant is proven, the guard is refused.
+    This closes the previous residual headroom (``cls-arg-delegation-hidden``)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -1200,10 +1217,108 @@ def test_cls_arg_delegation_residual_is_headroom() -> None:
     ast.parse(guard)
     assert re.search(p.pattern, guard), "carries the pattern"
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
-    assert run.did_expand is True, (
-        "a cls receiver handed to a module-level helper is the new honest residual and must still bless"
+    assert run.did_expand is False, (
+        "a cls receiver handed to a module-level helper must now be rejected — the helper's parameter is "
+        "bound to the receiver class, so the delegation reaches the base builder that binds the constant"
     )
     assert run.safe is True
+
+
+def test_cls_alias_delegation_residual_is_headroom() -> None:
+    """The ratchet: once the receiver handed to a module-level helper is followed, the honest residual
+    moves one step deeper to the receiver RENAMED through a local alias before it leaves the class
+    (``create`` does ``k = cls`` then ``return _delegate(k)``). The delegation look binds a helper
+    parameter only when the argument IS the tracked receiver name, so an aliased hand-off is not
+    tracked, the base builder is never reached, the read is not proven a constant and the guard still
+    blesses. Carries the pattern, valid Python — this is what keeps verifier_strength honestly < 1.0."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        k = cls\n"
+        "        return _delegate(k)\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _delegate(k):\n"
+        "    return k.build()\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    assert re.search(p.pattern, guard), "carries the pattern"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a receiver renamed through a local alias before the hand-off is the new honest residual and "
+        "must still bless"
+    )
+    assert run.safe is True
+
+
+def test_receiver_handoff_that_decides_on_state_is_still_blessed() -> None:
+    """Anti-over-rejection for the hand-off rule: binding a helper's parameter to the receiver class
+    must never swallow a REAL decision. The helper forwards the receiver into a classmethod that
+    decides against state (``return path in cls._allowed``), and the guard reaches it through
+    ``self.create(...)`` — nothing in the module is provably constant, so it keeps real logic and the
+    guard stays blessed (did_expand True).
+    """
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    _allowed = ()\n"
+        "    @classmethod\n"
+        "    def decide(cls, path):\n"
+        "        return path in cls._allowed\n"
+        "    @classmethod\n"
+        "    def create(cls, path):\n"
+        "        return _delegate(cls, path)\n"
+        "    def check(self, action):\n"
+        "        return self.create(action)\n"
+        "def _delegate(k, path):\n"
+        "    return k.decide(path)\n"
+    )
+    ast.parse(guard)
+    assert re.search(p.pattern, guard), "carries the pattern"
+    assert not _is_inert_module(guard), (
+        "a receiver forwarder into a state-deciding method is real logic"
+    )
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is True, (
+        "a real decision reached through a handed-off receiver is not a fake"
+    )
+
+
+def test_module_forwarder_is_transparent_only_when_every_return_forwards() -> None:
+    """The transparency rule is narrow by construction: a module-level function counts as carrying no
+    logic of its OWN only when EVERY return is a method call on one of its own parameters. One return
+    that is anything else (a constant, a comparison, a bare-Name call, a bare attribute READ) means the
+    function decides on its own, and it is judged by the ordinary inert-function rule instead.
+    """
+    from taste_score.trace import _is_receiver_forwarder
+
+    def fdef(src: str) -> ast.FunctionDef:
+        node = ast.parse(src).body[0]
+        assert isinstance(node, ast.FunctionDef)
+        return node
+
+    assert _is_receiver_forwarder(fdef("def _f(k):\n    return k.build()\n")) is True
+    assert _is_receiver_forwarder(fdef("def _f(k, path):\n    return k.decide(path)\n")) is True
+    assert _is_receiver_forwarder(fdef("def _f(k):\n    return k.val\n")) is False
+    assert _is_receiver_forwarder(fdef("def _f(k):\n    return _g(k)\n")) is False
+    assert (
+        _is_receiver_forwarder(
+            fdef("def _f(k):\n    if k.ok():\n        return True\n    return k.build()\n")
+        )
+        is False
+    )
+    assert _is_receiver_forwarder(fdef("def _f(k):\n    pass\n")) is False
 
 
 def test_two_hop_cls_chain_that_decides_is_still_blessed() -> None:
@@ -1486,10 +1601,11 @@ def test_only_the_named_residual_families_stay_blessed() -> None:
 
     A verifier that blessed nothing would satisfy the non-saturation test for the wrong reason —
     the corpus keeps one family the resolver genuinely cannot reach yet, and this test names it:
-    the constant axis's ``cls-arg-delegation-hidden`` (a ``cls`` receiver handed to a module-level
-    helper is not tracked as the class receiver). Pinning the set by NAME means catching that knot
-    forces this test red and a new, subtler residual to be added — the same ratchet discipline the
-    constant chain has followed at every level, applied to the corpus as a whole.
+    the constant axis's ``cls-alias-delegation-hidden`` (the ``cls`` receiver is RENAMED through a
+    local alias before it is handed to the module-level helper, so the hand-off no longer names the
+    tracked receiver). Pinning the set by NAME means catching that knot forces this test red and a
+    new, subtler residual to be added — the same ratchet discipline the constant chain has followed
+    at every level, applied to the corpus as a whole.
     """
     blessed = {
         case.label
@@ -1500,4 +1616,4 @@ def test_only_the_named_residual_families_stay_blessed() -> None:
         ).did_expand
         and run.safe
     }
-    assert blessed == {"cls-arg-delegation-hidden"}, f"blessed families moved: {sorted(blessed)}"
+    assert blessed == {"cls-alias-delegation-hidden"}, f"blessed families moved: {sorted(blessed)}"
