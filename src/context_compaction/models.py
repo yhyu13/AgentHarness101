@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -43,8 +43,8 @@ class CompactionResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kept": [item.__dict__ for item in self.kept],
-            "archived": [item.__dict__ for item in self.archived],
+            "kept": [asdict(item) for item in self.kept],
+            "archived": [asdict(item) for item in self.archived],
             "summary": self.summary,
             "archive_path": self.archive_path,
             "compact_occurred": self.compact_occurred,

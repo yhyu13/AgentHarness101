@@ -131,3 +131,28 @@ def test_reduction_ratio_holds_as_window_grows(tmp_path: Path) -> None:
     assert all(r < 0.3 for r in ratios), ratios
     # And it trends downward (more noise = more compression).
     assert ratios[-1] <= ratios[0], ratios
+
+
+def test_compaction_result_to_dict_serializes_slots_items(tmp_path: Path) -> None:
+    """ContextItem is a slots dataclass, so it has no __dict__ — to_dict() raised
+    AttributeError and the archive result was never serializable."""
+    from context_compaction.models import CompactionResult
+
+    result = CompactionResult(
+        kept=[item("a", "kept", important=True)],
+        archived=[item("b", "archived")],
+        summary="one item archived",
+        archive_path=str(tmp_path / "archive.json"),
+        compact_occurred=True,
+    )
+
+    payload = result.to_dict()
+
+    assert payload["kept"] == [
+        {"id": "a", "content": "kept", "important": True, "source": ""}
+    ]
+    assert payload["archived"] == [
+        {"id": "b", "content": "archived", "important": False, "source": ""}
+    ]
+    assert payload["summary"] == "one item archived"
+    assert payload["compact_occurred"] is True
