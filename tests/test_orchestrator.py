@@ -109,3 +109,38 @@ class TestOrchestratorInLoop:
         orch = _orch(_Planner(["a"]), _Executor(), _Reviewer(Verdict.PASS))
         runner = GoalLoopRunner(_spec(), runtime, orch.make, orch.check, state_dir=tmp_path)
         assert runner.run("t1") == GoalStatus.COMPLETE
+
+
+def test_orchestrator_aggregates_modified_files() -> None:
+    """Each executor reports the files it touched. Dropping them here pinned the
+    loop's files_changed counter at 0 no matter how much work the fan-out did."""
+
+    class _TouchingExecutor:
+        def __call__(self, spec: GoalSpec, plan: Plan, step: str) -> MakerOutput:
+            return MakerOutput(summary=step, modified_files=[f"{step}.py"], tokens_used=1)
+
+    orch = Orchestrator(_Planner(["a", "b"]), _TouchingExecutor(), _Reviewer())
+    out = orch.make(_spec(), state=None, steering="")
+
+    assert out.modified_files == ["a.py", "b.py"]
+
+
+def test_orchestrator_skips_an_agent_that_reports_no_files() -> None:
+    orch = Orchestrator(_Planner(["a"]), _Executor(), _Reviewer())
+    out = orch.make(_spec(), state=None, steering="")
+
+    assert out.modified_files == []
+
+
+def test_orchestrator_deduplicates_a_file_two_steps_touched() -> None:
+    """files_changed sums len(modified_files), so counting a repeat twice would
+    inflate the very number this aggregation exists to make honest."""
+
+    class _TouchingExecutor:
+        def __call__(self, spec: GoalSpec, plan: Plan, step: str) -> MakerOutput:
+            return MakerOutput(summary=step, modified_files=[f"{step}.py"], tokens_used=1)
+
+    orch = Orchestrator(_Planner(["a", "a"]), _TouchingExecutor(), _Reviewer())
+    out = orch.make(_spec(), state=None, steering="")
+
+    assert out.modified_files == ["a.py"]

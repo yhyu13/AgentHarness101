@@ -66,10 +66,12 @@ class Orchestrator:
             + (["errors: " + "; ".join(errors)] if errors else [])
         )
         tokens = sum(o.tokens_used for o in outputs)
+        modified = list(dict.fromkeys(f for o in outputs for f in o.modified_files))
         return MakerOutput(
             summary=summary,
             ok=ok,
             tokens_used=tokens,
+            modified_files=modified,
             self_verification="orchestrated planner -> executor(s) -> reviewer",
         )
 
