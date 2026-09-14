@@ -252,7 +252,11 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
     (a classmethod factory reached through a ``_Cls(...)`` construction), and now ``factory-instance-receiver-hidden``
     (a classmethod factory reached through an instance returned by a FACTORY FUNCTION, ``_make().create()``)
     is CAUGHT: the resolver ties a factory function's single statically-known return class back to the
-    classmethod receiver. Each
+    classmethod receiver. This fire a classmethod factory whose return class is reachable only through a
+    SIBLING classmethod DELEGATED VIA THE ``cls`` receiver (``create()`` doing ``return cls.build()``) is
+    CAUGHT too — the delegation look now follows an attribute call on the ``cls`` receiver. The honest
+    residual headroom moved one step deeper to ``nested-clsattr-delegation-hidden`` (a TWO-HOP
+    ``cls``-receiver chain, ``create()`` returning ``cls._mid()`` which returns ``cls.build()``). Each
     caught cheat level reveals a subtler still-unsolved one, so
     verifier_strength stays honestly < 1.0 — the non-saturation ratchet keeps firing."""
     for p in _constitution().principles:
@@ -422,11 +426,25 @@ def test_inert_vs_constant_hidden_and_helper_hidden_split_the_cheat_space() -> N
         )
         ast.parse(clsattr.text)  # valid Python
         run_clsattr = TraceabilityVerifier.classify(p.pattern, p.violations, clsattr.text, p.id)
-        assert run_clsattr.did_expand is True, (
+        assert run_clsattr.did_expand is False, (
             f"{p.id} factory-clsattr-delegation-hidden fake (constant reached through a classmethod "
             f"factory that DELEGATES to a sibling classmethod VIA THE ``cls`` receiver, "
-            f"``_make().create()`` where ``create`` does ``return cls.build()``) is the new honest residual "
-            f"headroom and must still bless"
+            f"``_make().create()`` where ``create`` does ``return cls.build()``) must now be rejected — "
+            f"the resolver follows an attribute call on the ``cls`` receiver to the base builder"
+        )
+        nested_clsattr = next(
+            c for c in mutant_cases(p) if c.label == "nested-clsattr-delegation-hidden"
+        )
+        assert re.search(p.pattern, nested_clsattr.text), (
+            f"{p.id} nested-clsattr-delegation-hidden fake must carry the pattern, "
+            f"got {nested_clsattr.text!r}"
+        )
+        ast.parse(nested_clsattr.text)  # valid Python
+        run_nca = TraceabilityVerifier.classify(p.pattern, p.violations, nested_clsattr.text, p.id)
+        assert run_nca.did_expand is True, (
+            f"{p.id} nested-clsattr-delegation-hidden fake (a TWO-HOP ``cls``-receiver delegation, "
+            f"``create()`` returning ``cls._mid()`` which returns ``cls.build()``) is the new honest "
+            f"residual headroom and must still bless"
         )
 
 
@@ -1027,13 +1045,13 @@ def test_factory_instance_receiver_constant_is_now_rejected() -> None:
     assert run.safe is True
 
 
-def test_factory_clsattr_delegation_residual_is_headroom() -> None:
-    """The ratchet: once ``factory-instance-receiver-hidden`` is caught, the honest residual moves one step
-    deeper to a factory-returned classmethod that DELEGATES to a sibling classmethod VIA THE ``cls`` receiver
-    (``_make().create().val`` where ``create`` does ``return cls.build()``). The classmethod to classmethod
-    delegation resolver follows a bare-Name sibling call (``create()`` returns ``_build()``) but NOT an
-    attribute on the ``cls`` receiver, so the read is not proven a constant and the guard still blesses.
-    Carries the pattern, valid Python — this is what keeps verifier_strength honestly < 1.0."""
+def test_factory_clsattr_delegation_constant_is_now_rejected() -> None:
+    """A constant reached through a factory-returned classmethod that DELEGATES to a sibling classmethod
+    VIA THE ``cls`` receiver (``_make().create().val`` where ``create`` does ``return cls.build()``) is an
+    inert pass-through: always the same constant, never inspects its inputs. The classmethod-to-classmethod
+    delegation resolver now follows an ATTRIBUTE call on the ``cls`` receiver (not just a bare-Name sibling
+    call), reaches the base builder that binds the constant, and refuses to bless it. This closes the
+    previous residual headroom (``factory-clsattr-delegation-hidden``)."""
     p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
     guard = (
         "class SafetyGuard:\n"
@@ -1055,9 +1073,81 @@ def test_factory_clsattr_delegation_residual_is_headroom() -> None:
     ast.parse(guard)
     assert re.search(p.pattern, guard), "carries the pattern"
     run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "a factory-returned classmethod that delegates to a sibling classmethod via the cls receiver must "
+        "now be rejected (the resolver follows an attribute call on the cls receiver to the base builder)"
+    )
+    assert run.safe is True
+
+
+def test_two_hop_sibling_delegation_chain_is_rejected() -> None:
+    """A classmethod factory that DELEGATES through a chain of SIBLING classmethod calls (``create()``
+    returns ``_mid()``, ``_mid`` returns ``_build()``, and ``_build`` is the base builder that calls the
+    mutator) is still an inert pass-through: the delegation look recurses through the sibling chain to the
+    base builder, so the constant is proven and the guard is NOT blessed. This pins the recursive
+    sibling-delegation branch of the resolver — the classmethod receiver must keep being threaded through
+    each hop of a bare-Name chain (only the ``cls``-receiver hop is single-step by design)."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def _build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def _mid(cls):\n"
+        "        return _build()\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return _mid()\n"
+        "    def check(self, action):\n"
+        "        return SafetyGuard.create()._ALWAYS\n"
+    )
+    ast.parse(guard)
+    assert re.search(p.pattern, guard), "carries the pattern"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
+    assert run.did_expand is False, (
+        "a two-hop bare-Name sibling delegation chain must be followed to the base builder and rejected"
+    )
+    assert run.safe is True
+
+
+def test_nested_clsattr_delegation_residual_is_headroom() -> None:
+    """The ratchet: once ``factory-clsattr-delegation-hidden`` is caught, the honest residual moves one step
+    deeper to a TWO-HOP ``cls``-receiver delegation (``_make().create().val`` where ``create`` does
+    ``return cls._mid()`` and ``_mid`` does ``return cls.build()``). The resolver follows one attribute call
+    on the ``cls`` receiver, not a chain of them, so the base builder is never reached, the read is not
+    proven a constant and the guard still blesses. Carries the pattern, valid Python — this is what keeps
+    verifier_strength honestly < 1.0."""
+    p = _constitution().principles[1]  # SEC-02 'class SafetyGuard|_HIGH_RISK_ACTIONS'
+    guard = (
+        "class SafetyGuard:\n"
+        "    def _setup(self):\n"
+        "        self._ALWAYS = True\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        h = cls()\n"
+        "        h._setup()\n"
+        "        return h\n"
+        "    @classmethod\n"
+        "    def _mid(cls):\n"
+        "        return cls.build()\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return cls._mid()\n"
+        "    def check(self, action):\n"
+        "        return _make().create()._ALWAYS\n"
+        "def _make():\n"
+        "    return SafetyGuard()\n"
+    )
+    ast.parse(guard)
+    assert re.search(p.pattern, guard), "carries the pattern"
+    run = TraceabilityVerifier.classify(p.pattern, p.violations, guard, p.id)
     assert run.did_expand is True, (
-        "a factory-returned classmethod that delegates via the cls receiver is the new honest residual and "
-        "must still bless"
+        "a two-hop cls-receiver delegation is the new honest residual and must still bless"
     )
     assert run.safe is True
 

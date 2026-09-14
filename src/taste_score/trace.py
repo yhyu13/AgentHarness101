@@ -381,24 +381,42 @@ def _sibling_method_factory_receiver(
     sources: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     classes: dict[str, ast.ClassDef],
     _depth: int = 0,
+    cls_name: str | None = None,
 ) -> tuple[ast.ClassDef | None, ast.FunctionDef | ast.AsyncFunctionDef | None]:
-    """``(class, factory_method)`` for a delegation whose return expr is a bare-Name CALL to a SIBLING
-    method of ``class_def`` (``create()`` returns ``_build()``, both ``@staticmethod`` on the same class).
+    """``(class, factory_method)`` for a delegation whose return expr calls a SIBLING method of
+    ``class_def`` — either a bare-Name call (``create()`` returns ``_build()``) or, when ``cls_name`` is
+    given, an attribute call on the ``@classmethod`` receiver (``create()`` returns ``cls.build()``).
 
     ``_factory_receiver`` resolves a module-level factory FUNCTION (a bare Name in ``sources``) or an
-    attribute call (``_Helper._build()``) — but a delegation whose return expr is a bare-Name call to a
-    method of the SAME class (neither in ``sources`` nor an attribute) falls through un-resolved, so the
-    guard is blessed. This recurses into the sibling method's own factory resolution (itself following a
-    delegation chain) to reach the BASE builder that directly constructs the class — the mutator that binds
-    the constant lives in that base builder's body, not in the delegating wrapper. ``_depth`` caps mutual
-    method-factory recursion (``a()`` returning ``b()`` returning ``a()`` cannot hang the detector). Returns
-    ``(None, None)`` when the bare name is not a method of ``class_def`` or the sibling is not a resolvable
-    factory."""
+    attribute call on a class NAME (``_Helper._build()``) — but a delegation whose return expr calls a method
+    of the SAME class (neither in ``sources`` nor an attribute on a known class) falls through un-resolved,
+    so the guard is blessed. This recurses into the sibling method's own factory resolution (itself following
+    a delegation chain) to reach the BASE builder that directly constructs the class — the mutator that binds
+    the constant lives in that base builder's body, not in the delegating wrapper. ``cls_name`` is the
+    first-arg receiver name of the ``@classmethod`` whose return expr is being resolved (``cls`` in ``return
+    cls.build()``): an attribute call on that name targets ``class_def`` itself. Only ONE such hop is followed
+    (the nested recursion passes no ``cls_name``), so a two-hop cls-receiver chain stays un-resolved
+    headroom. ``_depth`` caps mutual method-factory recursion (``a()`` returning ``b()`` returning ``a()``
+    cannot hang the detector). Returns ``(None, None)`` when the call is neither shape, the named method is
+    not a method of ``class_def``, or the sibling is not a resolvable factory."""
     if _depth > 8:
         return None, None
-    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)):
+    if not isinstance(value, ast.Call):
         return None, None
-    method = _find_method(class_def, value.func.id)
+    if isinstance(value.func, ast.Name):
+        method_name = value.func.id
+    elif (
+        cls_name is not None
+        and isinstance(value.func, ast.Attribute)
+        and isinstance(value.func.value, ast.Name)
+        and value.func.value.id == cls_name
+    ):
+        # A delegation through the `cls` receiver itself (`return cls.build()`): the attribute names a
+        # method of the class the @classmethod was called on, i.e. `class_def`.
+        method_name = value.func.attr
+    else:
+        return None, None
+    method = _find_method(class_def, method_name)
     if method is None:
         return None, None
     for r in _collect_returns_of(method):
@@ -476,25 +494,30 @@ def _class_factory_receiver(
     method = _find_method(cls, value.func.attr)
     if method is None:
         return None, None
-    # A delegating factory method (its return expr is itself a factory call, method or module fn) —
-    # recurse to the base builder first, so ``create()`` returning ``_build()`` resolves to ``_build``'s class.
-    for r in _collect_returns_of(method):
-        sub = _factory_receiver(r.value, sources, classes, _depth + 1)
-        if sub[0] is None:
-            # A delegation whose return expr is a bare-Name call to a SIBLING method on the same class
-            # (``create()`` returns ``_build()``, both ``@staticmethod``) is neither a module-level
-            # function (the module-function branch) nor an attribute call (``_Helper._build()``) — so
-            # ``_factory_receiver`` misses it. Recurse into the sibling method's own factory resolution
-            # to reach the base builder that directly constructs the class.
-            sub = _sibling_method_factory_receiver(r.value, cls, sources, classes, _depth + 1)
-        if sub[0] is not None:
-            return sub
-    # Not a delegation; this method directly constructs the class (or is not a resolvable factory).
-    # A `@classmethod` factory builds via `cls()` — the first-arg name of a classmethod IS the class it is
-    # called on, so resolve that construction back to `cls` (the receiver class named on the call site).
+    # A `@classmethod` factory's first-arg name IS the class it is called on, so both a `cls()`
+    # construction and a delegation through `cls.<sibling>()` resolve back to `cls`. Computed before the
+    # delegation loop so the `cls` receiver can be threaded into the sibling-delegation look.
     cls_name: str | None = None
     if _is_classmethod(method) and method.args.args:
         cls_name = method.args.args[0].arg
+    # A delegating factory method (its return expr is itself a factory call, method or module fn) —
+    # recurse to the base builder first, so ``create()`` returning ``_build()`` (or ``cls._build()``)
+    # resolves to the builder's class.
+    for r in _collect_returns_of(method):
+        sub = _factory_receiver(r.value, sources, classes, _depth + 1)
+        if sub[0] is None:
+            # A delegation whose return expr calls a SIBLING method on the same class — a bare-Name
+            # (``create()`` returns ``_build()``, both ``@staticmethod``) or an attribute on the ``cls``
+            # receiver (``create()`` returns ``cls.build()``) — is neither a module-level function (the
+            # module-function branch) nor an attribute call on a class name (``_Helper._build()``), so
+            # ``_factory_receiver`` misses it. Recurse into the sibling method's own factory resolution
+            # to reach the base builder that directly constructs the class.
+            sub = _sibling_method_factory_receiver(
+                r.value, cls, sources, classes, _depth + 1, cls_name
+            )
+        if sub[0] is not None:
+            return sub
+    # Not a delegation; this method directly constructs the class (or is not a resolvable factory).
     ret_cls = _factory_return_class(method, classes, sources, _depth, cls, cls_name)
     return (cls, method) if ret_cls is not None else (None, None)
 
@@ -949,11 +972,14 @@ def _returns_inert_instance(
     locals_map = _named_local_classes(fn, classes, enclosing_class, cls_name)
     cls = _return_expr_class(expr, locals_map, classes, sources, 0, enclosing_class, cls_name)
     if cls is None and enclosing_class is not None:
-        # A delegation whose return expr is a bare-Name call to a SIBLING METHOD of ``enclosing_class``
-        # (``create()`` returns ``_build()``, both ``@staticmethod``) is neither a module-level function
-        # nor a direct class construction, so ``_return_expr_class`` misses it. Resolve it through the
-        # sibling method's factory chain to the built class, then check that class's inertness.
-        built, _ = _sibling_method_factory_receiver(expr, enclosing_class, sources, classes)
+        # A delegation whose return expr calls a SIBLING METHOD of ``enclosing_class`` — a bare-Name
+        # (``create()`` returns ``_build()``, both ``@staticmethod``) or an attribute on the ``cls``
+        # receiver (``create()`` returns ``cls.build()``) — is neither a module-level function nor a
+        # direct class construction, so ``_return_expr_class`` misses it. Resolve it through the sibling
+        # method's factory chain to the built class, then check that class's inertness.
+        built, _ = _sibling_method_factory_receiver(
+            expr, enclosing_class, sources, classes, cls_name=cls_name
+        )
         if built is not None:
             cls = built
     if cls is None:
