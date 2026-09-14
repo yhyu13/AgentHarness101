@@ -12,9 +12,63 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from taste_score.constitution import DEFAULT_CONSTITUTION, Principle, load_constitution
+from taste_score.constitution import (
+    DEFAULT_CONSTITUTION,
+    Constitution,
+    Principle,
+    load_constitution,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Every fail-open a `violations` sentinel names, written the way a real cheater would write
+# it. For the `except`-based sentinels that is BOTH formats: the handler on ONE line (the
+# historical convention the sentinels were authored against) and on its OWN line (PEP8 — what
+# ruff-formatted `src/` actually looks like). A sentinel that only catches the first is blind
+# to an evasion that costs the cheater nothing but a newline: the ruler would report
+# `safe=True` on a swallow-and-continue handler. This table is the sample corpus the two ruler
+# tests below measure against, and it must cover EVERY sentinel-bearing principle — otherwise
+# a detection could be dropped on an unsampled principle without the monotonicity guard seeing it.
+FAIL_OPEN_FORMS: dict[str, tuple[str, ...]] = {
+    "SEC-01": ('def allows_write(self, p):\n    text = open(p, "w")\n    return text\n',),
+    "SEC-02": ("def act(self, action):\n    os.system('rm -rf /')\n",),
+    "SEC-03": ("def log(self, token):\n    logging.info('token=%s', token)\n",),
+    "SEC-04": ("def run(self, cmd):\n    subprocess.run(cmd)\n",),
+    "SEC-05": ("def guard(self, text):\n    eval(text)\n",),
+    "SEC-06": ("def run(self, argv):\n    subprocess.run(argv, env=os.environ)\n",),
+    "SEC-07": ("def verify(self, cmd):\n    subprocess.run(cmd, shell=True)\n",),
+    "SEC-08": ("def run(self, argv):\n    subprocess.run(argv, shell=True)\n",),
+    "SEC-09": (
+        "def v(self):\n    try:\n        return judge(x)\n"
+        "    except Exception: return Verdict.PASS\n",
+        "def v(self):\n    try:\n        return judge(x)\n"
+        "    except Exception:\n        return Verdict.PASS\n",
+    ),
+    "SEC-10": (
+        "def call(self, tool, payload):\n    try:\n        return self._dispatch(tool, payload)\n"
+        "    except Exception: return ToolResult(ok=True)\n",
+        "def call(self, tool, payload):\n    try:\n        return self._dispatch(tool, payload)\n"
+        "    except Exception:\n        return ToolResult(ok=True)\n",
+    ),
+    "SEC-11": (
+        "def start(self, cost, max_usd):\n    try:\n        guard_budget(cost, max_usd)\n"
+        "    except BudgetError: return cost\n",
+        "def start(self, cost, max_usd):\n    try:\n        guard_budget(cost, max_usd)\n"
+        "    except BudgetError:\n        return cost\n",
+    ),
+    "SEC-12": (
+        "def verify_all(self):\n    try:\n        return self._check(path, spec)\n"
+        "    except Exception: return CheckResult(ok=True)\n",
+        "def verify_all(self):\n    try:\n        return self._check(path, spec)\n"
+        "    except Exception:\n        return CheckResult(ok=True)\n",
+    ),
+    "SEC-13": (
+        "def run(self, cont):\n    try:\n        return maker(cont)\n"
+        "    except Exception: return MakerOutput(ok=True)\n",
+        "def run(self, cont):\n    try:\n        return maker(cont)\n"
+        "    except Exception:\n        return MakerOutput(ok=True)\n",
+    ),
+}
 
 
 def test_load_constitution_reads_principles() -> None:
@@ -383,3 +437,95 @@ def test_compliance_score_tracks_each_principle_implementation(tmp_path: Path) -
     # Empty constitution -> no principles, no credit.
     empty = Constitution(version="1.0.0", principles=())
     assert TraceabilityVerifier(empty).compliance() == 0.0
+
+
+def test_every_sentinel_fires_on_the_fail_open_it_names() -> None:
+    # A `violations` sentinel is the ruler's ONLY detector for the fail-open it names, and
+    # nothing measured it: the per-principle tests above only assert the sentinel is ABSENT
+    # from the anchor (no false positive), never that it FIRES on the thing it names (a false
+    # negative). A sentinel that only matches the one-line handler is blind to the PEP8
+    # own-line handler — a cheater keeps the fail-open and adds a newline, and the ruler still
+    # reports `safe=True`. Pin every sentinel against its own fail-open, both formats for the
+    # `except` ones.
+    c = load_constitution(DEFAULT_CONSTITUTION)
+    assert set(FAIL_OPEN_FORMS) == {p.id for p in c.principles}, (
+        "every constitution principle needs a fail-open sample (a new principle must not dodge "
+        f"this check; missing: {sorted({p.id for p in c.principles} - set(FAIL_OPEN_FORMS))})"
+    )
+    for p in c.principles:
+        forms = FAIL_OPEN_FORMS[p.id]
+        if "except" in p.violations:
+            assert len(forms) == 2, f"{p.id}: an `except` sentinel needs both formats sampled"
+        for i, form in enumerate(forms):
+            assert re.search(p.violations, form), (
+                f"{p.id} sentinel is blind to its fail-open (format {i + 1}/{len(forms)}): "
+                f"{p.violations!r}"
+            )
+
+
+def _constitution_at_git_head() -> Constitution | None:
+    """The committed ruler, or ``None`` when there is no git checkout/committed constitution."""
+    import subprocess
+    import tomllib
+
+    from taste_score.constitution import _from_payload
+
+    blob = subprocess.run(
+        ["git", "-C", str(ROOT), "show", "HEAD:src/taste_score/constitution.toml"],
+        capture_output=True,
+        text=True,
+    )
+    if blob.returncode != 0:
+        return None
+    return _from_payload(tomllib.loads(blob.stdout))
+
+
+def test_ruler_revision_never_loses_a_detection_against_git_head() -> None:
+    # The pin is regenerated whenever the ruler changes, and regenerating it is exactly how a
+    # WEAKENING would be laundered (see test_shipped_pin_matches_shipped_constitution). So the
+    # revision itself has to be provably monotone: every fail-open the committed ruler caught,
+    # the working-tree ruler must still catch. Tightening is allowed; losing a detection is not.
+    head = _constitution_at_git_head()
+    if head is None:
+        import pytest
+
+        pytest.skip("no git HEAD constitution to compare against")
+    new = load_constitution(DEFAULT_CONSTITUTION)
+    old_by_id = {p.id: p for p in head.principles}
+    lost: list[str] = []
+    for p in new.principles:
+        old = old_by_id.get(p.id)
+        if old is None:
+            continue
+        for form in FAIL_OPEN_FORMS.get(p.id, ()):
+            if re.search(old.violations, form) and not re.search(p.violations, form):
+                lost.append(p.id)
+    assert not lost, f"ruler revision lost a detection the committed ruler had: {sorted(set(lost))}"
+
+
+def test_verifier_calls_a_pep8_own_line_fail_open_unsafe(tmp_path: Path) -> None:
+    # End-to-end through the engine's own verdict, not just `re.search`: the shipped ruler must
+    # mark a swallow-and-continue handler UNSAFE even when its body sits on its own line —
+    # because that is what a real cheater's ruff-formatted `src/` looks like. If this passes only
+    # for the one-line form, `safe=True` (and the CSDD compliance it feeds) is evadable by a
+    # newline.
+    from dataclasses import replace
+
+    from taste_score.constitution import Constitution as C
+    from taste_score.trace import TraceabilityVerifier
+
+    guard = tmp_path / "world_verifier.py"
+    guard.write_text(
+        "class WorldVerifier:\n"
+        "    def verify_all(self, path, spec):\n"
+        "        try:\n"
+        "            return self._check(path, spec)\n"
+        "        except Exception:\n"
+        "            return CheckResult(ok=True)\n",
+        encoding="utf-8",
+    )
+    shipped = load_constitution(DEFAULT_CONSTITUTION)
+    reanchored = replace(next(p for p in shipped.principles if p.id == "SEC-12"), anchor=str(guard))
+    rows = TraceabilityVerifier(C(version=shipped.version, principles=(reanchored,))).matrix()
+    assert rows[0]["expanded"] is True
+    assert rows[0]["safe"] is False, "the ruler blessed a PEP8 own-line fail-open handler"
