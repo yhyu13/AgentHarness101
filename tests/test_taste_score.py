@@ -358,6 +358,37 @@ def test_sixth_lock_rejects_ruler_tamper() -> None:
     assert ok_scores["x"].rejected is False
 
 
+def test_ruler_tampered_predicate_is_the_one_verdict_both_layers_read() -> None:
+    """Lock 6's verdict is a single predicate, read by the gate (which vetoes every agent)
+    and by the round summary (which then publishes no score). If the two ever compared
+    differently, the ledger could keep crediting a round the gate had already voided —
+    which is how a tampered constitution came back looking like a healthy night.
+    """
+    from taste_score.constitution import Constitution, Principle
+    from taste_score.gate import ruler_tampered
+
+    princ = Principle(
+        id="SEC-01",
+        boundary="b",
+        cwe="CWE-22",
+        level="MUST",
+        constraint="c",
+        anchor="src/sandbox/path_policy.py",
+        pattern="allow",
+        violations="write_text",
+        rationale="r",
+    )
+    good = Constitution(version="1.0.0", principles=(princ,))
+    tampered = Constitution(version="9.9.9", principles=(princ,))
+
+    assert ruler_tampered(good.digest(), good) is False
+    assert ruler_tampered(good.digest(), tampered) is True
+    # No pin configured means nothing to compare against, so there is no verdict to give;
+    # no constitution supplied means there is no ruler to judge either.
+    assert ruler_tampered(None, tampered) is False
+    assert ruler_tampered(good.digest(), None) is False
+
+
 def test_suggest_amendments_tightens_from_vetoed_rows() -> None:
     from taste_score.amendments import suggest_amendments
 
@@ -392,11 +423,13 @@ def test_compete_with_constitution_pins_digest_and_reports_amendments(
 
     # compete() is called without a pin here, so it takes read_pin()'s env -> file
     # fallback. An exported AH_CONSTITUTION_PIN makes that fallback something other
-    # than the honest digest, every agent comes back vetoed, and every assertion below
-    # still passes: the recorded digest is still the honest one, csdd_score is still
-    # 1.0, and "amendments" is a key-presence check an empty list satisfies. Measured:
-    # env unset -> 1/3 rejected, 1 amendment; env=deadbeef -> 3/3 rejected, 0
-    # amendments, same green. Clear it so the run below is the run this test names.
+    # than the honest digest: every agent comes back vetoed and the round is voided
+    # (csdd_score 0.0, verifier_strength 0.0, amendments []), yet every assertion below
+    # still passes — the recorded constitution_digest is the loaded one, the csdd bound
+    # admits 0.0, and "traceability"/"amendments" are key-presence checks. Measured: env
+    # unset -> 1/3 rejected, 1 amendment, csdd 1.0; env=deadbeef -> 3/3 rejected, 0
+    # amendments, csdd 0.0, same green. Clear it so the run below is the run this test
+    # names.
     monkeypatch.delenv(ENV_VAR, raising=False)
 
     out = tmp_path / "ledger.json"

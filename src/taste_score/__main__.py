@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from taste_score.amendments import ratify, suggest_amendments
-from taste_score.gate import TasteGate
+from taste_score.gate import TasteGate, ruler_tampered
 from taste_score.models import Probe, ProbeRun
 from taste_score.mutator import Mutator
 from taste_score.mutation_score import verifier_strength
@@ -25,6 +26,11 @@ from taste_score.source import build_initial_probes
 from taste_score.trace import TraceabilityVerifier
 
 LEDGER = Path(__file__).resolve().parent / "ledger.json"
+
+# Exit code for a round Lock 6 vetoed. The run itself completed, but its verdict is not a
+# score: the constitution it graded against is not the one the pin names. Distinct from 1
+# so a caller can tell "refused to certify this round" from "the run crashed".
+ROUND_VOIDED = 2
 
 
 def build_demo_agents() -> dict[str, object]:
@@ -134,6 +140,13 @@ def compete(
     # The pin must come from outside this process (env / checked-in constant), never
     # from the constitution being graded — otherwise the comparison is a tautology.
     pinned = pin if pin is not None else read_pin()
+    # Lock 6 at the round boundary. The per-agent veto lives in the gate, but a round that
+    # lost its ruler must also stop publishing a summary: csdd_score / verifier_strength
+    # are read off the very constitution the pin just refused, so the ledger's headline
+    # would be the engine grading itself (自述不可信, one level up) and a tampered
+    # constitution would read as a healthy night to anyone watching the score or the exit
+    # code. The gate and this flag share one predicate so the two can never disagree.
+    voided = ruler_tampered(pinned, constitution)
     for night in range(nights):
         nseed = seed + night
         menu = [mutator.mutate(p, nseed + i) for i in range(mutants_n) for p in golden[:3]]
@@ -154,27 +167,54 @@ def compete(
         # matrix (paper L7) so the constitution layer is visible in the score.
         ledger["constitution_digest"] = constitution.digest()
         ledger["traceability"] = verify.matrix()
-        # The single-agent cumulative score: fraction of principles implemented AND clean.
-        # Each modification that installs a guard or removes a violation raises this.
-        ledger["csdd_score"] = verify.compliance()
-        # The NON-saturable measure: how much of a cheater's fake guard does the verifier
-        # refuse to bless? <1.0 = honest headroom (the naive regex can't yet spot a stub
-        # or comment-only pattern). csdd_score saturates at 1.0; this does not.
-        ledger["verifier_strength"] = verifier_strength(constitution)
-        amendments = suggest_amendments(
-            [{"agent": r["agent"], "probe": r["rejected_probe"], "rejected": r["rejected"],
-              "reason": r["reason"]} for r in rows]
-        )
-        ledger["amendments"] = [
-            {"principle_id": a.principle_id, "action": a.action, "detail": a.detail,
-             "evidence": list(a.evidence), "ratified": ratify(a)}
-            for a in amendments
-        ]
+        if voided:
+            # A voided round publishes no score. 0.0 is the demotion, never a claim that
+            # the engine implemented nothing. Both digests are recorded so the
+            # disagreement is traceable without re-running anything, and the improvement
+            # loop stays empty: a proposal derived from a round just refused is precisely
+            # how a tamper gets laundered into a rule change.
+            ledger["constitution_integrity_violation"] = True
+            ledger["pinned_digest"] = pinned
+            ledger["loaded_digest"] = constitution.digest()
+            ledger["csdd_score"] = 0.0
+            ledger["verifier_strength"] = 0.0
+            ledger["amendments"] = []
+        else:
+            # The single-agent cumulative score: fraction of principles implemented AND
+            # clean. Each modification that installs a guard or removes a violation
+            # raises this.
+            ledger["csdd_score"] = verify.compliance()
+            # The NON-saturable measure: how much of a cheater's fake guard does the
+            # verifier refuse to bless? <1.0 = honest headroom (the naive regex can't yet
+            # spot a stub or comment-only pattern). csdd_score saturates at 1.0; this
+            # does not.
+            ledger["verifier_strength"] = verifier_strength(constitution)
+            amendments = suggest_amendments(
+                [
+                    {
+                        "agent": r["agent"],
+                        "probe": r["rejected_probe"],
+                        "rejected": r["rejected"],
+                        "reason": r["reason"],
+                    }
+                    for r in rows
+                ]
+            )
+            ledger["amendments"] = [
+                {
+                    "principle_id": a.principle_id,
+                    "action": a.action,
+                    "detail": a.detail,
+                    "evidence": list(a.evidence),
+                    "ratified": ratify(a),
+                }
+                for a in amendments
+            ]
 
     dest = Path(out)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-    return 0
+    return ROUND_VOIDED if voided else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -212,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         code = args.fn(args.nights, args.mutants, args.seed, args.out)
     print(f"wrote nightly taste-score ledger to {args.out}")
+    if code == ROUND_VOIDED:
+        print(
+            "constitution integrity violation (ruler tampered): round voided, no score "
+            "published",
+            file=sys.stderr,
+        )
     return code
 
 

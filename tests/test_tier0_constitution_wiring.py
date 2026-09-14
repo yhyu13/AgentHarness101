@@ -127,8 +127,122 @@ def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) 
         assert row["reason"] == "constitution integrity violation (ruler tampered)"
 
 
-def _run_cli(constitution_path: Path, pin: str, out: Path) -> list[dict]:
-    """Drive ``main()`` as the operator would and return the ledger's ranking rows."""
+def test_a_voided_round_publishes_no_score(tmp_path: Path) -> None:
+    """Lock 6 must reach the ROUND, not only the per-agent rows.
+
+    ``gate.py`` vetoes every agent when the ruler is tampered, but the ledger's headline
+    numbers were still computed from the very constitution under dispute: the summary
+    reported a healthy ``csdd_score`` for a ruler the pin does not name, so a tamper was
+    indistinguishable from a good night to anything that reads the score. A vetoed round
+    publishes no score.
+    """
+    import json
+
+    from taste_score.__main__ import compete
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    tampered = load_constitution(_tampered(tmp_path))
+    out = tmp_path / "ledger.json"
+
+    compete(
+        nights=1,
+        mutants_n=1,
+        seed=1,
+        out=str(out),
+        constitution=tampered,
+        pin=real.digest(),
+    )
+
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    assert ledger["constitution_integrity_violation"] is True
+    assert ledger["csdd_score"] == 0.0
+    assert ledger["verifier_strength"] == 0.0
+    # The disagreement stays traceable: which pin, which loaded ruler.
+    assert ledger["pinned_digest"] == real.digest()
+    assert ledger["loaded_digest"] == tampered.digest()
+    # A voided round is not admissible evidence for the improvement loop either.
+    assert ledger["amendments"] == []
+    # Every agent is still recorded, so the night stays auditable.
+    assert len(ledger["nights"][0]["ranking"]) == len(build_demo_agents())
+
+
+def test_a_voided_round_fails_the_process(tmp_path: Path) -> None:
+    """The other half of the same veto: a caller that never opens the ledger still has to
+    be able to tell a refused round from a scored one, so the exit code says so."""
+    from taste_score.__main__ import ROUND_VOIDED, compete
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    tampered = load_constitution(_tampered(tmp_path))
+
+    code = compete(
+        nights=1,
+        mutants_n=0,
+        seed=1,
+        out=str(tmp_path / "ledger.json"),
+        constitution=tampered,
+        pin=real.digest(),
+    )
+
+    assert code == ROUND_VOIDED != 0
+
+
+def test_a_clean_round_still_publishes_its_score(tmp_path: Path) -> None:
+    """Mirror control: when the pin names the loaded ruler nothing moves — the round
+    keeps its honest score, its exit code and its amendment proposals."""
+    import json
+
+    from taste_score.__main__ import compete
+    from taste_score.trace import TraceabilityVerifier
+
+    real = load_constitution(DEFAULT_CONSTITUTION)
+    out = tmp_path / "ledger.json"
+
+    code = compete(
+        nights=1, mutants_n=1, seed=1, out=str(out), constitution=real, pin=real.digest()
+    )
+
+    assert code == 0
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    assert ledger.get("constitution_integrity_violation", False) is False
+    assert ledger["csdd_score"] == pytest.approx(TraceabilityVerifier(real).compliance())
+    assert ledger["verifier_strength"] > 0.0
+    assert ledger["amendments"], "a conceded safety boundary must still produce a proposal"
+
+
+def test_the_round_verdict_comes_from_the_pin_not_from_the_constitution(tmp_path: Path) -> None:
+    """The opposite direction, at the round level: a void flag that ignores the pin
+    (always fires, or compares the file against itself) is not Lock 6. Pinning the
+    *tampered* digest makes that same weakened file scoreable again, because the
+    comparison is against a digest held outside it."""
+    import json
+
+    from taste_score.__main__ import compete
+
+    tampered_path = _tampered(tmp_path)
+    tampered = load_constitution(tampered_path)
+    out = tmp_path / "ledger.json"
+
+    code = compete(
+        nights=1,
+        mutants_n=0,
+        seed=1,
+        out=str(out),
+        constitution=tampered,
+        pin=tampered.digest(),
+    )
+
+    assert code == 0, "a ruler the pin names is not tampering"
+    ledger = json.loads(out.read_text(encoding="utf-8"))
+    assert ledger.get("constitution_integrity_violation", False) is False
+    assert ledger["csdd_score"] > 0.0
+
+
+def _run_cli(constitution_path: Path, pin: str, out: Path, *, expect_code: int = 0) -> list[dict]:
+    """Drive ``main()`` as the operator would and return the ledger's ranking rows.
+
+    ``expect_code`` is the process exit code the operator sees: 0 for a scored round,
+    ``ROUND_VOIDED`` for a round Lock 6 refused to certify.
+    """
     import json
 
     from taste_score.__main__ import main
@@ -150,7 +264,7 @@ def _run_cli(constitution_path: Path, pin: str, out: Path) -> list[dict]:
             "1",
         ]
     )
-    assert code == 0
+    assert code == expect_code, f"exit code {code} != {expect_code}"
     return json.loads(out.read_text(encoding="utf-8"))["nights"][0]["ranking"]
 
 
@@ -174,7 +288,14 @@ def test_cli_pin_flag_vetoes_a_ruler_the_pin_does_not_name(tmp_path: Path) -> No
     # constitution.pin) this fails loudly here instead of quietly passing below.
     assert read_pin() == real.digest(), "fallback pin is not the honest digest"
 
-    ranking = _run_cli(DEFAULT_CONSTITUTION, wrong_pin, tmp_path / "ledger.json")
+    # The refusal reaches the operator in two places, not one: every agent is vetoed in
+    # the ranking AND the process exits with ROUND_VOIDED, because a round graded against
+    # a ruler the pin does not name has no verdict to publish.
+    from taste_score.__main__ import ROUND_VOIDED
+
+    ranking = _run_cli(
+        DEFAULT_CONSTITUTION, wrong_pin, tmp_path / "ledger.json", expect_code=ROUND_VOIDED
+    )
 
     assert ranking, "ledger must still record every agent"
     for row in ranking:

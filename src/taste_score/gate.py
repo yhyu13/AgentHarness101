@@ -30,6 +30,27 @@ AgentMap = Mapping[str, Agent]
 Verify = Callable[[str, Probe], ProbeRun | None]
 
 
+def ruler_tampered(pinned_digest: str | None, constitution: Constitution | None) -> bool:
+    """Lock 6's verdict: is the loaded ruler the one the pin names?
+
+    One predicate, used by BOTH layers that must act on it — :meth:`TasteGate.score`,
+    which vetoes every agent, and the round summary in :mod:`taste_score.__main__`, which
+    then publishes no score at all. Two separate comparisons would be two rulers for the
+    rule itself: the ledger could keep crediting a round the gate had already voided, which
+    is exactly how a tampered constitution came back looking like a healthy night.
+
+    The expected digest is held OUTSIDE the constitution on purpose (env / checked-in pin).
+    Deriving it from the same object — ``pinned = constitution.digest()`` — makes the
+    comparison a tautology and Lock 6 decorative. ``None`` means unpinned: nothing to
+    compare against, so there is no tamper verdict to give.
+    """
+    return (
+        constitution is not None
+        and pinned_digest is not None
+        and constitution.digest() != pinned_digest
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TasteGate:
     """Runs the four anti-Goodhart locks over a set of agents."""
@@ -50,11 +71,7 @@ class TasteGate:
     ) -> dict[str, TasteScore]:
         # Lock 6 — protect the ruler: if a constitution is supplied and its digest
         # does not match the pinned one, someone swapped/weakened it. Veto all.
-        if (
-            constitution is not None
-            and self.pinned_digest is not None
-            and constitution.digest() != self.pinned_digest
-        ):
+        if ruler_tampered(self.pinned_digest, constitution):
             return {
                 name: TasteScore(
                     agent=name, rejected=True,
