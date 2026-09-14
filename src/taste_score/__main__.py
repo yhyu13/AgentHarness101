@@ -189,7 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     comp.add_argument(
         "--constitution",
         default=None,
-        help="path to a constitution.toml; pins it as the ruler and enables traceability verify",
+        help="path to a constitution.toml to grade against; the expected digest "
+             "comes from --pin, AH_CONSTITUTION_PIN, or constitution.pin",
     )
     comp.add_argument(
         "--pin",

@@ -89,7 +89,7 @@ def test_shipped_pin_matches_shipped_constitution() -> None:
 
 
 def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) -> None:
-    """End-to-end: a weakened constitution cannot be scored, even by the CLI path."""
+    """End-to-end: a weakened constitution cannot be scored."""
     import json
 
     from taste_score.__main__ import compete
@@ -106,6 +106,57 @@ def test_compete_vetoes_every_agent_when_the_ruler_was_tampered(tmp_path: Path) 
     for row in ranking:
         assert row["rejected"] is True
         assert row["reason"] == "constitution integrity violation (ruler tampered)"
+
+
+def _run_cli(constitution_path: Path, pin: str, out: Path) -> list[dict]:
+    """Drive ``main()`` as the operator would and return the ledger's ranking rows."""
+    import json
+
+    from taste_score.__main__ import main
+
+    code = main([
+        "compete",
+        "--constitution", str(constitution_path),
+        "--pin", pin,
+        "--out", str(out),
+        "--nights", "1",
+        "--mutants", "1",
+        "--seed", "1",
+    ])
+    assert code == 0
+    return json.loads(out.read_text(encoding="utf-8"))["nights"][0]["ranking"]
+
+
+def test_cli_pin_flag_vetoes_when_the_ruler_was_tampered(tmp_path: Path) -> None:
+    """End-to-end through ``main()``: a weakened constitution the operator did not
+    pin is vetoed, so the direct-call test's claim also holds on the CLI path."""
+    real = load_constitution(DEFAULT_CONSTITUTION)
+
+    ranking = _run_cli(_tampered(tmp_path), real.digest(), tmp_path / "ledger.json")
+
+    assert ranking, "ledger must still record every agent"
+    for row in ranking:
+        assert row["rejected"] is True
+        assert row["reason"] == "constitution integrity violation (ruler tampered)"
+
+
+def test_cli_pin_flag_is_what_the_ruler_is_compared_against(tmp_path: Path) -> None:
+    """The twin of the test above, and why that one is not vacuous.
+
+    The veto compares the loaded digest against ``--pin``, not against the repo's
+    ``constitution.pin``: pinning the *tampered* digest makes the very same file
+    scoreable again. Drop ``--pin`` in ``main()`` and this test fails — the fallback
+    ``read_pin()`` hands back the repo's real digest, which the tampered file no
+    longer matches, so every agent comes back vetoed.
+    """
+    tampered_path = _tampered(tmp_path)
+    tampered = load_constitution(tampered_path)
+
+    ranking = _run_cli(tampered_path, tampered.digest(), tmp_path / "ledger.json")
+
+    assert ranking, "ledger must still record every agent"
+    reasons = [row["reason"] for row in ranking]
+    assert "constitution integrity violation (ruler tampered)" not in reasons, reasons
 
 
 def test_pareto_veto_reports_the_probe_that_was_conceded() -> None:
